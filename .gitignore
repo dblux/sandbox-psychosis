@@ -1,0 +1,10 @@
+# Files and directories to ignore
+__pycache__/
+data/
+docs/
+src/
+outputs/
+
+.Rhistory
+.RData
+.DS_Store
