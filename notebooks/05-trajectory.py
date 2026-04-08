@@ -281,6 +281,7 @@ prots_spearman.shape
 
 # TODO: Plot PCA of trajectories (cvt only), color by fep_delta
 
+
 def plot_pca_trajectory(
     x, metadata, filepath
 ):
