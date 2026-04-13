@@ -4,7 +4,7 @@ This is a data science project investigating quantitative proteomics data obtain
 
 # Work Style
 
-I will be using .py notebooks instead of .ipynb notebooks for this project. Do not run any python or R commands, I will run the notebooks and scripts myself.
+I will be using .py notebooks instead of .ipynb notebooks for this project. Do not run any python or R commands, I will run the notebooks and scripts myself. Please clarify any ambiguities in my instructions before proceeding.
 
 # Directory Restrictions
 

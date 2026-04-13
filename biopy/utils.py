@@ -110,6 +110,7 @@ def plot_pca(
     z = z.join(metadata)
 
     hue = kwargs.pop('hue', None)
+    hue_label = kwargs.pop('hue_label', hue)
     palette = kwargs.pop('palette', 'viridis')
     cmap_aliases = {'rocket': 'magma'}
     palette = cmap_aliases.get(palette, palette)
@@ -190,7 +191,7 @@ def plot_pca(
             cbar = fig.colorbar(sm, ax=ax)
         else:
             cbar = fig.colorbar(scatter, ax=ax)
-        cbar.set_label(hue)
+        cbar.set_label(hue_label)
         if 'date' in hue:
             cbar.ax.yaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
 
@@ -214,6 +215,7 @@ def plot_umap(
     z = z.join(metadata)
 
     hue = kwargs.pop('hue', None)
+    hue_label = kwargs.pop('hue_label', hue)
     palette = kwargs.pop('palette', 'viridis')
     cmap_aliases = {'rocket': 'magma'}
     palette = cmap_aliases.get(palette, palette)
@@ -294,7 +296,7 @@ def plot_umap(
             cbar = fig.colorbar(sm, ax=ax)
         else:
             cbar = fig.colorbar(scatter, ax=ax)
-        cbar.set_label(hue)
+        cbar.set_label(hue_label)
         if 'date' in hue:
             cbar.ax.yaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
 
