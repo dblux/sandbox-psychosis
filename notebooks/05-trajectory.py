@@ -33,12 +33,11 @@ metadata['collection_datenum'] = mdates.date2num(metadata.collection_datetime)
 filepath = 'data/processed/reprocessed-data-renamed.csv'
 data = pd.read_csv(filepath, index_col=0)
 data.replace(0, np.nan, inplace=True)
+map_uniprot_gene = {k: v for k, v in zip(data.index, data.Gene)}
 psy = np.log2(data.iloc[:, 2:-46])
 # LYRIKS
 lyriks = psy.iloc[:, psy.columns.str.startswith('L')].copy()
 lyriks_full = lyriks.dropna()
-
-map_uniprot_gene = {k: v for k, v in zip(data.index, data.Gene)}
 
 
 ##### Biomarker identification #####
@@ -140,145 +139,120 @@ map_timepoint_marker = {
     12: 's',
     24: '^'
 }
+map_group_marker = {
+    'Convert': 'o',
+    'Maintain': 's',
+    'Healthy control': '^',
+    'Remit': 'D'
+}
 
-### Plot: Corrected data ###
+### Plot: Raw data ###
 
-# rhos = []
-# for prot in cmc_combat_0409.index:
-#     symbol = map_uniprot_gene[prot]
-#     rho = spearmanr(
-#         cvt_int.fep_delta,
-#         cvt_int.loc[:, prot]
-#     ).correlation
-#     rhos.append(rho)
-#     fig, ax = plt.subplots(figsize=(6, 4))
-#     ax.scatter(
-#         cvt_int.fep_delta,
-#         cvt_int.loc[:, prot],
-#         c=cvt_int.extraction_date.map(batch_colours)
-#     )
-#     ax.set_title(f'{symbol} (r = {rho:.2f}) - Convert')
-#     ax.set_xlabel("Months to conversion")
-#     ax.set_ylabel(symbol)
-#     for _, patient in cvt_int.sort_values("timepoint").groupby("sn"):
-#         ax.plot(
-#             patient["fep_delta"],
-#             patient.loc[:, prot],
-#             color="gray", alpha=0.4, linewidth=1
-#         )
-#     dirpath = 'tmp/astral/fig/trajectory/cvt/combat_0409/'
-#     filepath = os.path.join(
-#         dirpath,
-#         f'm2c-cvt-{int(abs(rho * 100)):02}-{prot}.pdf'
-#     )
-#     plt.savefig(filepath, dpi=300, bbox_inches='tight')
-#     print(filepath)
-# 
-# # Maintain
-# for prot in cmc.index:
-#     rho = spearmanr(
-#         mnt_int.timepoint,
-#         mnt_int.loc[:, prot]
-#     ).correlation
-#     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 4))
-#     ax1.scatter(
-#         mnt_int.timepoint,
-#         mnt_int.loc[:, prot],
-#         c=mnt_int.extraction_date.map(batch_colours)
-#     )
-#     ax1.set_title(f'{prot} (r = {rho:.2f}) - Maintain')
-#     ax1.set_xlabel("Timepoint")
-#     ax1.set_ylabel(prot)
-#     for _, patient in mnt_int.sort_values("timepoint").groupby("sn"):
-#         ax1.plot(
-#             patient["timepoint"],
-#             patient.loc[:, prot],
-#             color="gray", alpha=0.4, linewidth=1
-#         )
-#     handles = []
-#     for g, subdf in mnt_int.groupby("timepoint"):
-#         h = ax2.scatter(
-#             subdf["run_datenum"],
-#             subdf.loc[:, prot],
-#             c=subdf.extraction_date.map(batch_colours),
-#             marker=map_timepoint_marker[g],
-#             label=str(g)
-#         )
-#         handles.append(h)
-#     ax2.set_xlabel("Run time")
-#     ax2.legend(handles=handles, loc="best")
-#     handles = []
-#     for g, subdf in mnt_int.groupby("timepoint"):
-#         h = ax3.scatter(
-#             subdf["collection_datenum"],
-#             subdf.loc[:, prot],
-#             c=subdf.extraction_date.map(batch_colours),
-#             marker=map_timepoint_marker[g],
-#             label=str(g)
-#         )
-#         handles.append(h)
-#     ax3.set_xlabel("Collection time")
-#     ax3.legend(handles=handles, loc="best")
-#     dirpath = 'tmp/astral/fig/trajectory/mnt/limma_0409/'
-#     filepath = os.path.join(
-#         dirpath,
-#         f'm2c_mnt-{int(abs(rho * 100)):02}-{prot}.pdf'
-#     )
-#     plt.savefig(filepath, dpi=300, bbox_inches='tight')
-#     print(filepath)
-# 
-# # Control
-# for prot in cmc.index:
-#     rho = spearmanr(
-#         ctrl_int.timepoint,
-#         ctrl_int.loc[:, prot]
-#     ).correlation
-#     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 4))
-#     ax1.scatter(
-#         ctrl_int.timepoint,
-#         ctrl_int.loc[:, prot],
-#         c=ctrl_int.extraction_date.map(batch_colours)
-#     )
-#     ax1.set_title(f'{prot} (r = {rho:.2f}) - Control')
-#     ax1.set_xlabel("Timepoint")
-#     ax1.set_ylabel(prot)
-#     for _, patient in ctrl_int.sort_values("timepoint").groupby("sn"):
-#         ax1.plot(
-#             patient["timepoint"],
-#             patient.loc[:, prot],
-#             color="gray", alpha=0.4, linewidth=1
-#         )
-#     handles = []
-#     for g, subdf in ctrl_int.groupby("timepoint"):
-#         h = ax2.scatter(
-#             subdf["run_datenum"],
-#             subdf.loc[:, prot],
-#             c=subdf.extraction_date.map(batch_colours),
-#             marker=map_timepoint_marker[g],
-#             label=str(g)
-#         )
-#         handles.append(h)
-#     ax2.set_xlabel("Run time")
-#     ax2.legend(handles=handles, loc="best")
-#     handles = []
-#     for g, subdf in ctrl_int.groupby("timepoint"):
-#         h = ax3.scatter(
-#             subdf["collection_datenum"],
-#             subdf.loc[:, prot],
-#             c=subdf.extraction_date.map(batch_colours),
-#             marker=map_timepoint_marker[g],
-#             label=str(g)
-#         )
-#         handles.append(h)
-#     ax3.set_xlabel("Collection time")
-#     ax3.legend(handles=handles, loc="best")
-#     dirpath = 'tmp/astral/fig/trajectory/ctrl/limma_0409/'
-#     filepath = os.path.join(
-#         dirpath,
-#         f'm2c_ctrl-{int(abs(rho * 100)):02}-{prot}.pdf'
-#     )
-#     plt.savefig(filepath, dpi=300, bbox_inches='tight')
-#     print(filepath)
+prots_batch_effects = ['P02647', 'P00747']
+# Plot all samples
+for prot in prots_batch_effects:
+    ylabel = f"{map_uniprot_gene[prot]} ({prot})"
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4), sharey=True)
+    sns.scatterplot(
+        data=lyriks_int, x="collection_datenum", y=prot,
+        hue="extraction_date", style="group",
+        palette=batch_colours, alpha=0.7, edgecolor='none', legend=False,
+        ax=ax1
+    )
+    sns.scatterplot(
+        data=lyriks_int, x="run_datenum", y=prot,
+        hue="extraction_date", style="group",
+        palette=batch_colours, alpha=0.7, edgecolor='none', ax=ax2
+    )
+    ax1.set_ylabel(ylabel)
+    ax2.legend(loc="upper left", bbox_to_anchor=(1, 1))
+    ax1.set_xlabel("Collection time")
+    ax2.set_xlabel("Run time")
+    dirpath = 'outputs/figs/trajectory/raw/'
+    filepath = os.path.join(
+        dirpath,
+        f'runtime_collectiontime-raw-{prot}.pdf'
+    )
+    plt.savefig(filepath, dpi=300, bbox_inches='tight')
+    print(filepath)
+
+for prot in prots_batch_effects:
+    fig = plt.figure(figsize=(7, 5))
+    ax = fig.add_subplot(111, projection='3d')
+    for g, subdf in lyriks_int.groupby("group"):
+        ax.scatter(
+            subdf["collection_datenum"],
+            subdf["run_datenum"],
+            subdf[prot],
+            c=subdf.extraction_date.map(batch_colours),
+            marker=map_group_marker[g],
+            alpha=0.7,
+            depthshade=False,
+            label=g
+        )
+    ax.view_init(elev=15, azim=-30)
+    ax.set_xlabel("Collection time")
+    ax.set_ylabel("Run time")
+    ax.set_zlabel(f"{map_uniprot_gene[prot]} ({prot})")
+    ax.legend(loc="upper left", bbox_to_anchor=(1, 1))
+    dirpath = 'outputs/figs/trajectory/raw/'
+    filepath = os.path.join(dirpath, f'3D-collectiontime_runtime-{prot}.pdf')
+    plt.savefig(filepath, dpi=300, bbox_inches='tight')
+    print(filepath)
+
+
+# Plot control samples
+for prot in prots_batch_effects:
+    rho = spearmanr(
+        ctrl_int.timepoint,
+        ctrl_int.loc[:, prot]
+    ).correlation
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 4))
+    ax1.scatter(
+        ctrl_int.timepoint,
+        ctrl_int.loc[:, prot],
+        c=ctrl_int.extraction_date.map(batch_colours)
+    )
+    ax1.set_title(f'{prot} (r = {rho:.2f}) - Control')
+    ax1.set_xlabel("Timepoint")
+    ax1.set_ylabel(prot)
+    for _, patient in ctrl_int.sort_values("timepoint").groupby("sn"):
+        ax1.plot(
+            patient["timepoint"],
+            patient.loc[:, prot],
+            color="gray", alpha=0.4, linewidth=1
+        )
+    handles = []
+    for g, subdf in ctrl_int.groupby("timepoint"):
+        h = ax2.scatter(
+            subdf["run_datenum"],
+            subdf.loc[:, prot],
+            c=subdf.extraction_date.map(batch_colours),
+            marker=map_timepoint_marker[g],
+            label=str(g)
+        )
+        handles.append(h)
+    ax2.set_xlabel("Run time")
+    ax2.legend(handles=handles, loc="best")
+    handles = []
+    for g, subdf in ctrl_int.groupby("timepoint"):
+        h = ax3.scatter(
+            subdf["collection_datenum"],
+            subdf.loc[:, prot],
+            c=subdf.extraction_date.map(batch_colours),
+            marker=map_timepoint_marker[g],
+            label=str(g)
+        )
+        handles.append(h)
+    ax3.set_xlabel("Collection time")
+    ax3.legend(handles=handles, loc="best")
+    dirpath = 'outputs/figs/trajectory/ctrl/limma_0409/'
+    filepath = os.path.join(
+        dirpath,
+        f'm2c_ctrl-{int(abs(rho * 100)):02}-{prot}.pdf'
+    )
+    plt.savefig(filepath, dpi=300, bbox_inches='tight')
+    print(filepath)
 
 
 ### Plot ###
