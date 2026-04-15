@@ -73,12 +73,12 @@ metadata_month.loc[
 # filepath = 'data/tmp/metadata-fep_delta.csv'
 # metadata_month.to_csv(filepath, index=True)
 
-lyriks_int = lyriks_full.T.join(metadata_month, how='inner')
+lyriks_meta = lyriks_full.T.join(metadata_month, how='inner')
 
 # # Identify the patient IDs of all timepoints from outliers
-# outliers = lyriks_int.index[
-#     (lyriks_int.extraction_date == '4/9/24') &
-#     (lyriks_int.run_datetime > pd.to_datetime('2024-09-20 12:00:00'))
+# outliers = lyriks_meta.index[
+#     (lyriks_meta.extraction_date == '4/9/24') &
+#     (lyriks_meta.run_datetime > pd.to_datetime('2024-09-20 12:00:00'))
 # ]
 # outliers_sn = outliers.str.split('_').str[0] # ['L0626C', 'L0018C']
 
@@ -91,43 +91,8 @@ lyriks_int = lyriks_full.T.join(metadata_month, how='inner')
 # )
 # ctrl_raw_int = ctrl_raw.T.join(metadata_month, how='inner')
 
-### Corrected data ###
 
-# ComBat corrected
-filepath = 'data/tmp/corrected-twostep/lyriks_cmc-combat_0409.csv'
-cmc_combat_0409 = pd.read_csv(filepath, index_col=0)
-
-# # Limma corrected
-# filepath = 'data/tmp/server/cmc-limma_0409.csv'
-# cmc_limma_0409 = pd.read_csv(filepath, index_col=0)
-
-# # L0073S_24 is not FEP but UHR
-# metadata_month.loc[
-#     metadata_month.sn == 'L0073S',
-#     ['group', 'state', 'fep_delta']
-# ]
-
-cmc_int = cmc_combat_0409.T.join(metadata_month, how='inner')
-
-cvt = bp.subset(
-    cmc_combat_0409,
-    metadata,
-    "(group == 'Convert')" # & (sn != 'L0073S')"
-)
-cvt_int = cvt.T.join(metadata_month, how='inner')
-mnt = bp.subset(
-    cmc_combat_0409, metadata,
-    "group == 'Maintain'"
-)
-mnt_int = mnt.T.join(metadata_month, how='inner')
-ctrl = bp.subset(
-    cmc_combat_0409, metadata,
-    "group == 'Healthy control'"
-)
-ctrl_int = ctrl.T.join(metadata_month, how='inner')
-
-
-### Plot trajectories ###
+### Plot: Raw data ###
 
 batch_colours = {
     '28/8/24': 'tab:blue',
@@ -146,21 +111,18 @@ map_group_marker = {
     'Remit': 'D'
 }
 
-### Plot: Raw data ###
 
-prots_batch_effects = ['P02647', 'P00747']
-# Plot all samples
-for prot in prots_batch_effects:
+def plot_batch_effects_2d(df, prot, batch_colours):
     ylabel = f"{map_uniprot_gene[prot]} ({prot})"
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4), sharey=True)
     sns.scatterplot(
-        data=lyriks_int, x="collection_datenum", y=prot,
+        data=df, x="collection_datenum", y=prot,
         hue="extraction_date", style="group",
         palette=batch_colours, alpha=0.7, edgecolor='none', legend=False,
         ax=ax1
     )
     sns.scatterplot(
-        data=lyriks_int, x="run_datenum", y=prot,
+        data=df, x="run_datenum", y=prot,
         hue="extraction_date", style="group",
         palette=batch_colours, alpha=0.7, edgecolor='none', ax=ax2
     )
@@ -168,24 +130,19 @@ for prot in prots_batch_effects:
     ax2.legend(loc="upper left", bbox_to_anchor=(1, 1))
     ax1.set_xlabel("Collection time")
     ax2.set_xlabel("Run time")
-    dirpath = 'outputs/figs/trajectory/raw/'
-    filepath = os.path.join(
-        dirpath,
-        f'runtime_collectiontime-raw-{prot}.pdf'
-    )
-    plt.savefig(filepath, dpi=300, bbox_inches='tight')
-    print(filepath)
+    return fig
 
-for prot in prots_batch_effects:
+
+def plot_batch_effects_3d(df, prot, batch_colours, group_markers):
     fig = plt.figure(figsize=(7, 5))
     ax = fig.add_subplot(111, projection='3d')
-    for g, subdf in lyriks_int.groupby("group"):
+    for g, subdf in df.groupby("group"):
         ax.scatter(
             subdf["collection_datenum"],
             subdf["run_datenum"],
             subdf[prot],
             c=subdf.extraction_date.map(batch_colours),
-            marker=map_group_marker[g],
+            marker=group_markers[g],
             alpha=0.7,
             depthshade=False,
             label=g
@@ -195,11 +152,56 @@ for prot in prots_batch_effects:
     ax.set_ylabel("Run time")
     ax.set_zlabel(f"{map_uniprot_gene[prot]} ({prot})")
     ax.legend(loc="upper left", bbox_to_anchor=(1, 1))
-    dirpath = 'outputs/figs/trajectory/raw/'
-    filepath = os.path.join(dirpath, f'3D-collectiontime_runtime-{prot}.pdf')
-    plt.savefig(filepath, dpi=300, bbox_inches='tight')
+    return fig
+
+
+prots_batch_effects = ['P02647', 'P00747']
+dirpath = 'outputs/figs/trajectory/batch_effects/'
+for prot in prots_batch_effects:
+    fig = plot_batch_effects_2d(lyriks_meta, prot, batch_colours)
+    filepath = os.path.join(dirpath, f'collectiontime_runtime-raw-{prot}.pdf')
+    fig.savefig(filepath, dpi=300, bbox_inches='tight')
     print(filepath)
 
+for prot in prots_batch_effects:
+    fig = plot_batch_effects_3d(
+        lyriks_meta, prot, batch_colours, map_group_marker
+    )
+    filepath = os.path.join(dirpath, f'3D-collectiontime_runtime-{prot}.pdf')
+    fig.savefig(filepath, dpi=300, bbox_inches='tight')
+    print(filepath)
+
+
+### Corrected data ###
+
+# L0073S_24 is not FEP but UHR!
+
+# ComBat corrected
+filepath = 'data/tmp/corr-2step/lyriks393-combat_0409.csv'
+lyriks393_combat_0409 = pd.read_csv(filepath, index_col=0)
+lyriks393cb_meta = lyriks393_combat_0409.T.join(metadata_month, how='inner')
+
+prots_batch_effects = ['P02647', 'P00747']
+dirpath = 'outputs/figs/trajectory/batch_effects/'
+for prot in prots_batch_effects:
+    fig = plot_batch_effects_2d(lyriks393cb_meta, prot, batch_colours)
+    filepath = os.path.join(dirpath, f'collectiontime_runtime-combat0409-{prot}.pdf')
+    fig.savefig(filepath, dpi=300, bbox_inches='tight')
+    print(filepath)
+
+for prot in prots_batch_effects:
+    fig = plot_batch_effects_3d(
+        lyriks393cb_meta, prot, batch_colours, map_group_marker
+    )
+    filepath = os.path.join(
+        dirpath,
+        f'3D-collectiontime_runtime-combat0409-{prot}.pdf'
+    )
+    fig.savefig(filepath, dpi=300, bbox_inches='tight')
+    print(filepath)
+
+
+### Plot trajectories ###
 
 # Plot control samples
 for prot in prots_batch_effects:
@@ -284,10 +286,13 @@ spearman_cvt = pd.read_csv(file, index_col=0)
 prots_spearman = spearman_cvt.index[abs(spearman_cvt.spearman_r) > 0.4]
 prots_spearman.shape
 
-
-### Plot trajectories of cvt, mnt, ctrl patients ###
+### Plot trajectories of patients across different groups ###
 
 # x: sn, timepoint, extraction_date, fep_delta, cca1, group
+
+# TODO: change function to plot early remit and late remit
+# TODO: find out column which specifies early or late
+lyriks_meta.columns[-30:]
 
 def plot_trajectory(x, feature, ylabel, batch_colours):
     """Plot 3-panel trajectory figure for a single feature.
