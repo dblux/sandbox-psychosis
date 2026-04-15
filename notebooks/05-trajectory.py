@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import statsmodels.api as sm
 import matplotlib as mpl
-from scipy.stats import spearmanr, ttest_rel
+from scipy.stats import spearmanr, ttest_rel, kendalltau
 from statsmodels.formula.api import ols
 from statsmodels.stats.multitest import multipletests
 from sklearn.decomposition import PCA
@@ -49,20 +49,32 @@ map_uniprot_gene = {k: v for k, v in zip(data.index, data.Gene)}
 filepath = 'data/tmp/cvt-fep_delta.csv'
 fep_delta = pd.read_csv(filepath, index_col=0)
 
-metadata_fep_delta = metadata.join(
+metadata_month = metadata.join(
     fep_delta[['month_of_conversion', 'fep_delta']],
     how='left'
 )
-metadata_fep_delta['month_of_conversion'] = (
-    metadata_fep_delta
+metadata_month.rename(
+    columns={'fep_delta': 'month'}, inplace=True
+)
+metadata_month['month_of_conversion'] = (
+    metadata_month
         .month_of_conversion
         .astype('Int64')
 )
 
-# filepath = 'data/tmp/metadata-fep_delta.csv'
-# metadata_fep_delta.to_csv(filepath, index=True)
+# Impute missing month for LYRIKS patients
+metadata_month.loc[
+    (metadata_month.month.isna()) & (metadata_month.study == 'LYRIKS'),
+    'month'
+] = metadata_month.loc[
+    (metadata_month.month.isna()) & (metadata_month.study == 'LYRIKS'),
+    'timepoint'
+]
 
-lyriks_int = lyriks_full.T.join(metadata_fep_delta, how='inner')
+# filepath = 'data/tmp/metadata-fep_delta.csv'
+# metadata_month.to_csv(filepath, index=True)
+
+lyriks_int = lyriks_full.T.join(metadata_month, how='inner')
 
 # # Identify the patient IDs of all timepoints from outliers
 # outliers = lyriks_int.index[
@@ -78,7 +90,7 @@ lyriks_int = lyriks_full.T.join(metadata_fep_delta, how='inner')
 #     lyriks_full, metadata,
 #     "group == 'Healthy control'"
 # )
-# ctrl_raw_int = ctrl_raw.T.join(metadata_fep_delta, how='inner')
+# ctrl_raw_int = ctrl_raw.T.join(metadata_month, how='inner')
 
 ### Corrected data ###
 
@@ -91,29 +103,29 @@ cmc_combat_0409 = pd.read_csv(filepath, index_col=0)
 # cmc_limma_0409 = pd.read_csv(filepath, index_col=0)
 
 # # L0073S_24 is not FEP but UHR
-# metadata_fep_delta.loc[
-#     metadata_fep_delta.sn == 'L0073S',
+# metadata_month.loc[
+#     metadata_month.sn == 'L0073S',
 #     ['group', 'state', 'fep_delta']
 # ]
 
-cmc_int = cmc_combat_0409.T.join(metadata_fep_delta, how='inner')
+cmc_int = cmc_combat_0409.T.join(metadata_month, how='inner')
 
 cvt = bp.subset(
     cmc_combat_0409,
     metadata,
     "(group == 'Convert')" # & (sn != 'L0073S')"
 )
-cvt_int = cvt.T.join(metadata_fep_delta, how='inner')
+cvt_int = cvt.T.join(metadata_month, how='inner')
 mnt = bp.subset(
     cmc_combat_0409, metadata,
     "group == 'Maintain'"
 )
-mnt_int = mnt.T.join(metadata_fep_delta, how='inner')
+mnt_int = mnt.T.join(metadata_month, how='inner')
 ctrl = bp.subset(
     cmc_combat_0409, metadata,
     "group == 'Healthy control'"
 )
-ctrl_int = ctrl.T.join(metadata_fep_delta, how='inner')
+ctrl_int = ctrl.T.join(metadata_month, how='inner')
 
 
 ### Plot trajectories ###
@@ -292,11 +304,12 @@ map_timepoint_marker = {
 # spearman_cvt.to_csv(filepath, index=True)
 # print(filepath)
 
-# # Load proteins (spearman's)
-# file = 'outputs/tmp/cvt-spearman.csv'
-# spearman_cvt = pd.read_csv(file, index_col=0)
-# prots_spearman = spearman_cvt.index[abs(spearman_cvt.spearman_r) > 0.4]
-# prots_spearman.shape
+# Load proteins (spearman's)
+file = 'outputs/tmp/cvt-spearman.csv'
+spearman_cvt = pd.read_csv(file, index_col=0)
+prots_spearman = spearman_cvt.index[abs(spearman_cvt.spearman_r) > 0.4]
+prots_spearman.shape
+
 
 ### Plot trajectories of cvt, mnt, ctrl patients ###
 
@@ -389,6 +402,8 @@ for prot in prots_spearman:
     plt.close()
 
 
+### CCA ###
+
 # ### Plot CCA trajectory ###
 # 
 # cca_scores = pd.read_csv('data/tmp/zhihao/cca_m2c-scores.csv')
@@ -401,96 +416,11 @@ for prot in prots_spearman:
 # plt.close()
 
 
-### Plot trajectory in PCA and UMAP space ###
+# %% Load CCA model and get weights
 
-# def plot_pca_trajectory(x, metadata, filepath):
-#     fig, ax = plt.subplots(figsize=(8, 4))
-#     ax, pca_cvt = bp.plot_pca(
-#         ax,
-#         x.loc[prots_spearman],
-#         metadata.loc[x.columns],
-#         colourbar=True,
-#         return_fig=False,
-#         hue='fep_delta',
-#         hue_label='Months to conversion',
-#         palette='rocket'
-#     )
-#     for _, patient in pca_cvt.sort_values("timepoint").groupby("sn"):
-#         ax.plot(
-#             patient["PC1"],
-#             patient["PC2"],
-#             color="gray", alpha=0.4, linewidth=1
-#         )
-#     plt.savefig(filepath, dpi=300, bbox_inches='tight')
-# 
-# plot_pca_trajectory(
-#     cmc_combat_0409.loc[prots_spearman],
-#     metadata_fep_delta,
-#     'outputs/figs/trajectory/pca-spearman10-cmc_combat_0409.pdf'
-# )
-# 
-# 
-# def plot_umap_trajectory(x, metadata, filepath):
-#     fig, ax = plt.subplots(figsize=(8, 4))
-#     ax, umap_cvt = bp.plot_umap(
-#         ax,
-#         x,
-#         metadata.loc[x.columns],
-#         colourbar=True,
-#         return_fig=False,
-#         hue='fep_delta',
-#         hue_label='Months to conversion',
-#         palette='rocket'
-#     )
-#     for _, patient in umap_cvt.sort_values("timepoint").groupby("sn"):
-#         ax.plot(
-#             patient["UMAP1"],
-#             patient["UMAP2"],
-#             color="gray", alpha=0.4, linewidth=1
-#         )
-#     plt.savefig(filepath, dpi=300, bbox_inches='tight')
-# 
-# plot_umap_trajectory(
-#     cmc_combat_0409.loc[prots_spearman],
-#     metadata_fep_delta,
-#     'outputs/figs/trajectory/umap-spearman10-cmc_combat_0409.pdf'
-# )
-
-
-### Slopes ###
-
-# TODO: Slope features
-filepath = 'data/tmp/zhihao/slope_features.csv'
-slope_features = pd.read_csv(filepath, index_col=0)
-slope_features.head()
-slope_features.columns.tolist()
-
-prots_slope = ['Q7Z7G0', 'P43652', 'P02760', 'Q15113', 'P02786']
-slope_features1 = slope_features.loc[
-    :, slope_features.columns.str.startswith(tuple(prots_slope))]
-
-slope_features.loc[
-    slope_features.group == 'Convert',
-    ['Q7Z7G0__velocity']
-]
-
-tmp = cmc_int.loc[
-    cmc_int.group == 'Convert',
-    ['Q7Z7G0', 'fep_delta']
-]
-tmp
-(13.93 - 13.608) / (0.72+9) / 31
-
-# TODO: Check whether features were calculated correctly
-# TODO: Compute ANOVA p-values
-
-# TODO: Check pickle object
 filepath = 'data/tmp/zhihao/cca.pkl'
 with open(filepath, 'rb') as f:
     cca = pickle.load(f)
-
-type(cca)
-dir(cca)
 
 model = cca['cca_model']
 weights = model.x_weights_
@@ -499,9 +429,290 @@ weights = pd.DataFrame({
     'coef': weights[:, 0]
 }, index=cmc_combat_0409.index)
 weights.sort_values('coef', ascending=False, key=abs, inplace=True)
-filepath = 'outputs/tmp/cca_weights.csv'
-weights.to_csv(filepath)
+weights.head()
+# filepath = 'outputs/tmp/cca_weights.csv'
+# weights.to_csv(filepath)
 
+weights.coef.hist(bins=20)
+plt.show()
+
+uids_cca = weights.index[weights.coef.abs() > 0.1]
+
+### Plot trajectory in PCA and UMAP space ###
+
+def plot_pca_trajectory(x, metadata, filepath):
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax, pca_cvt = bp.plot_pca(
+        ax,
+        x,
+        metadata.loc[x.columns],
+        colourbar=True,
+        return_fig=False,
+        hue='fep_delta',
+        hue_label='Months to conversion',
+        palette='rocket'
+    )
+    for _, patient in pca_cvt.sort_values("timepoint").groupby("sn"):
+        ax.plot(
+            patient["PC1"],
+            patient["PC2"],
+            color="gray", alpha=0.4, linewidth=1
+        )
+    plt.savefig(filepath, dpi=300, bbox_inches='tight')
+
+
+plot_pca_trajectory(
+    cmc_combat_0409.loc[uids_cca],
+    metadata_month,
+    'outputs/figs/trajectory/pca-cca23-cmc_combat_0409.pdf'
+)
+
+plot_pca_trajectory(
+    cvt.loc[uids_cca],
+    metadata_month,
+    'outputs/figs/trajectory/pca-cca23-cvt_combat_0409.pdf'
+)
+
+plot_pca_trajectory(
+    cvt.loc[prots_spearman],
+    metadata_month,
+    'outputs/figs/trajectory/pca-spearman8-cvt_combat_0409.pdf'
+)
+
+
+def plot_umap_trajectory(x, metadata, filepath):
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax, umap_cvt = bp.plot_umap(
+        ax,
+        x,
+        metadata.loc[x.columns],
+        colourbar=True,
+        return_fig=False,
+        hue='fep_delta',
+        hue_label='Months to conversion',
+        palette='rocket'
+    )
+    for _, patient in umap_cvt.sort_values("timepoint").groupby("sn"):
+        ax.plot(
+            patient["UMAP1"],
+            patient["UMAP2"],
+            color="gray", alpha=0.4, linewidth=1
+        )
+    plt.savefig(filepath, dpi=300, bbox_inches='tight')
+
+plot_umap_trajectory(
+    cmc_combat_0409.loc[prots_spearman],
+    metadata_month,
+    'outputs/figs/trajectory/umap-spearman10-cmc_combat_0409.pdf'
+)
+
+
+### Slopes ###
+
+def compute_slope_features(
+    X: pd.DataFrame, metadata: pd.DataFrame, func: callable
+):
+    '''Computes slope features for every protein using func
+
+    Args:
+        X: DataFrame of shape (n_features, n_samples)
+        metadata: indexed by sample with 'month' and 'sn' columns
+        func: A function that accepts a sub-dataframe consisting of
+            patient samples with protein columns including 'month' and 'sn'.
+            Function has to return a pd.DataFrame with correct index.
+
+    Returns:
+        pd.DataFrame: DataFrame of shape (n_patients, n_features)
+    '''
+    assert X.columns.isin(metadata.index).all()
+    X_meta = X.T.join(metadata_month[['month', 'sn']], how='inner')
+    X_meta.sort_values('month', inplace=True)
+    results = X_meta.groupby('sn').apply(func)
+    return results
+
+
+def compute_velocity(X_meta):
+    X = X_meta.iloc[:, :-2]
+    duration = X_meta['month'][-1] - X_meta['month'][0]
+    velocity = (X.iloc[-1,:] - X.iloc[0,:]) / duration
+    print(type(velocity))
+    return velocity
+
+
+def compute_sd(X_meta):
+    X = X_meta.iloc[:, :-2]
+    return X.std(axis=0, ddof=1)
+
+
+def compute_cv(X_meta):
+    X = X_meta.iloc[:, :-2]
+    return X.std(axis=0, ddof=1) / X.mean(axis=0)
+
+
+def compute_kendall_tau(X_meta):
+    X = X_meta.iloc[:, :-2]
+    ranks = np.arange(len(X))
+    return X.apply(lambda col: kendalltau(ranks, col.values).statistic)
+
+
+def compute_speed(X_meta):
+    '''
+    Args:
+        X_meta: DataFrame of shape (m_samples, n_features + 2) consisting of
+            samples of one patient
+
+    Returns:
+        DataFrame of shape (1, n_features)
+    '''
+    X = X_meta.iloc[:, :-2]
+    duration = X_meta['month'][-1] - X_meta['month'][0]
+    speed = np.abs(np.diff(X, axis=0)).sum(axis=0) / duration
+    return pd.Series(speed, index=X.columns)
+
+
+velocities = compute_slope_features(
+    cmc_combat_0409, metadata_month, compute_velocity
+)
+
+speeds = compute_slope_features(
+    cmc_combat_0409, metadata_month, compute_speed
+)
+
+sds = compute_slope_features(
+    cmc_combat_0409, metadata_month, compute_sd
+)
+
+cvs = compute_slope_features(
+    cmc_combat_0409, metadata_month, compute_cv
+)
+
+taus = compute_slope_features(
+    cmc_combat_0409, metadata_month, compute_kendall_tau
+)
+
+rel_velocities = velocities / speeds
+
+sn_group = metadata_month[['sn', 'group']].drop_duplicates('sn').set_index('sn')
+group_order = ['Convert', 'Maintain', 'Healthy control']
+
+
+group_palette = {
+    'Convert': 'tab:red',
+    'Maintain': 'tab:blue',
+    'Healthy control': 'tab:green',
+}
+
+for prot in prots_spearman:
+    symbol = map_uniprot_gene[prot]
+    feature_dfs = []
+    for src_df, col, label in [
+        (velocities, prot, 'velocity'),
+        (speeds, prot, 'speed'),
+        (rel_velocities, prot, 'rel_velocity'),
+        (sds, prot, 'sd'),
+        (cvs, prot, 'cv'),
+        (taus, prot, 'tau'),
+    ]:
+        df = src_df[[col]].join(sn_group, how='left')
+        df.columns = [label, 'group']
+        df = df[df['group'].isin(group_order)]
+        feature_dfs.append((df, label))
+
+    ylabels = {
+        'velocity': 'Velocity',
+        'speed': 'Speed',
+        'rel_velocity': 'Velocity / Speed',
+        'sd': 'SD',
+        'cv': 'CV',
+        'tau': "Kendall's tau",
+    }
+
+    fig, axes = plt.subplots(2, 3, figsize=(14, 8))
+    axes = axes.flatten()
+    fig.suptitle(f'{symbol} ({prot})')
+
+    for ax, (df, label) in zip(axes, feature_dfs):
+        sns.stripplot(
+            data=df, x='group', y=label, order=group_order,
+            palette=group_palette, jitter=True, alpha=0.7, ax=ax
+        )
+        ax.axhline(0, linestyle='--', color='black', linewidth=0.8)
+        ax.set_xlabel('')
+        ax.set_ylabel(ylabels[label])
+
+    plt.tight_layout()
+    plt.savefig(
+        f'outputs/figs/trajectory/features/features-{symbol}.pdf',
+        dpi=300, bbox_inches='tight'
+    )
+    plt.close()
+
+avg_features = pd.DataFrame({
+    'velocity': velocities[prots_spearman].mean(axis=1),
+    'speed': speeds[prots_spearman].mean(axis=1),
+    'rel_velocity': rel_velocities[prots_spearman].mean(axis=1),
+    'sd': sds[prots_spearman].mean(axis=1),
+    'cv': cvs[prots_spearman].mean(axis=1),
+    'tau': taus[prots_spearman].mean(axis=1),
+}).join(sn_group, how='left')
+avg_features = avg_features[avg_features['group'].isin(group_order)]
+
+ylabels = {
+    'velocity': 'Velocity',
+    'speed': 'Speed',
+    'rel_velocity': 'Velocity / Speed',
+    'sd': 'SD',
+    'cv': 'CV',
+    'tau': "Kendall's tau",
+}
+
+fig, axes = plt.subplots(2, 3, figsize=(14, 8))
+axes = axes.flatten()
+fig.suptitle("Average across 8 proteins (Spearman's)")
+
+for ax, label in zip(axes, ylabels):
+    sns.stripplot(
+        data=avg_features, x='group', y=label, order=group_order,
+        palette=group_palette, jitter=True, alpha=0.7, ax=ax
+    )
+    ax.axhline(0, linestyle='--', color='black', linewidth=0.8)
+    ax.set_xlabel('')
+    ax.set_ylabel(ylabels[label])
+
+plt.tight_layout()
+plt.savefig(
+    'outputs/figs/trajectory/features/features-avg_spearman.pdf',
+    dpi=300, bbox_inches='tight'
+)
+plt.close()
+
+for prot in prots_spearman:
+    p1 = velocities[prot]
+    print(p1[p1 > 0.1])
+
+metadata_month.loc[metadata_month.group == 'Convert', ['sn', 'month']]
+
+
+# filepath = 'data/tmp/zhihao/slope_features.csv'
+# raw_slope_features = pd.read_csv(filepath, index_col=0)
+# raw_slope_features.head()
+# raw_slope_features.columns.tolist()
+# 
+# slope_features = raw_slope_features.iloc[:, :-2]
+# velocities_zh = raw_slope_features.loc[
+#     :, raw_slope_features.columns.str.endswith('velocity')
+# ]
+# velocities_zh.columns = velocities_zh.columns.str[:-10]
+# speeds_zh = raw_slope_features.loc[
+#     :, raw_slope_features.columns.str.endswith('speed')
+# ]
+# speeds_zh.columns = speeds_zh.columns.str[:-7]
+# 
+# prots_slope = ['Q7Z7G0', 'P43652', 'P02760', 'Q15113', 'P02786']
+# 
+# velocities[prots_slope[0]].tail(20)
+# velocities_zh[prots_slope[0]].tail(20)
+# ZH: Velocities were not computed using fep_delta
 
 # ### Aggregate trajectories ###
 # 
@@ -538,7 +749,7 @@ weights.to_csv(filepath)
 # top_up = spearman_top.uniprot[spearman_top.spearman_r > 0]
 # top_down = spearman_top.uniprot[spearman_top.spearman_r <= 0]
 # 
-# agg = metadata_fep_delta.loc[
+# agg = metadata_month.loc[
 #     cvt.columns,
 #     ['sn', 'timepoint', 'fep_delta']
 # ].copy()
@@ -548,14 +759,14 @@ weights.to_csv(filepath)
 #     'mnt_up': mnt.loc[top_up].sum(axis=0),
 #     'mnt_down': mnt.loc[top_down].sum(axis=0)
 # }).join(
-#     metadata_fep_delta[['sn', 'timepoint', 'extraction_date']],
+#     metadata_month[['sn', 'timepoint', 'extraction_date']],
 #     how='left'
 # )
 # agg_ctrl = pd.DataFrame({
 #     'ctrl_up': ctrl.loc[top_up].sum(axis=0),
 #     'ctrl_down': ctrl.loc[top_down].sum(axis=0)
 # }).join(
-#     metadata_fep_delta[['sn', 'timepoint', 'extraction_date']],
+#     metadata_month[['sn', 'timepoint', 'extraction_date']],
 #     how='left'
 # )
 # 
@@ -612,7 +823,7 @@ weights.to_csv(filepath)
 
 ### TODO: Paired t-test (against zero)
 
-# metadata_convert = metadata_fep_delta.query(
+# metadata_convert = metadata_month.query(
 #     "group == 'Convert' and sn != 'L0073S'"
 # )
 # 
@@ -659,4 +870,4 @@ weights.to_csv(filepath)
 # # Convert column names back otherwise it will cause issues substracting
 # corr_matched.columns = lyriks_cvt.columns
 # lyriks_corr = lyriks_cvt - corr_matched
-# lyriks_corr_int = lyriks_corr.T.join(metadata_fep_delta, how='inner')
+# lyriks_corr_int = lyriks_corr.T.join(metadata_month, how='inner')
