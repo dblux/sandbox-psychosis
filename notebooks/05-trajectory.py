@@ -4,17 +4,18 @@ import pandas as pd
 import numpy as np
 import statsmodels.api as sm
 import matplotlib as mpl
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import seaborn as sns
 from scipy.stats import spearmanr, ttest_rel, kendalltau, f_oneway
 from statsmodels.formula.api import ols
 from statsmodels.stats.multitest import multipletests
 from sklearn.decomposition import PCA
-
 from matplotlib.lines import Line2D
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-import seaborn as sns
+
 import biopy.utils as bp
 
+### Metadata ###
 
 filepath = 'data/metadata/metadata-psy_602_16-v2.csv'
 metadata = pd.read_csv(filepath, index_col=0)
@@ -29,26 +30,11 @@ metadata.collection_datetime = pd.to_datetime(
 )
 metadata['collection_datenum'] = mdates.date2num(metadata.collection_datetime)
 
-filepath = 'data/processed/reprocessed-data-renamed.csv'
-data = pd.read_csv(filepath, index_col=0)
-data.replace(0, np.nan, inplace=True)
-map_uniprot_gene = {k: v for k, v in zip(data.index, data.Gene)}
-psy = np.log2(data.iloc[:, 2:-46])
-# LYRIKS
-lyriks = psy.iloc[:, psy.columns.str.startswith('L')].copy()
-lyriks_full = lyriks.dropna()
-
-
-##### Biomarker identification #####
-
-### Conversion signature ###
-
 # Detailed months to conversion
-filepath = 'data/tmp/cvt-fep_delta.csv'
-fep_delta = pd.read_csv(filepath, index_col=0)
-
+filepath = 'data/tmp/cvt-m2c.csv'
+m2c = pd.read_csv(filepath, index_col=0)
 metadata_month = metadata.join(
-    fep_delta[['month_of_conversion', 'fep_delta']],
+    m2c[['month_of_conversion', 'fep_delta']],
     how='left'
 )
 metadata_month.rename(
@@ -59,7 +45,6 @@ metadata_month['month_of_conversion'] = (
         .month_of_conversion
         .astype('Int64')
 )
-
 # Impute missing month for LYRIKS patients
 metadata_month.loc[
     (metadata_month.month.isna()) & (metadata_month.study == 'LYRIKS'),
@@ -69,10 +54,34 @@ metadata_month.loc[
     'timepoint'
 ]
 
-# filepath = 'data/tmp/metadata-fep_delta.csv'
-# metadata_month.to_csv(filepath, index=True)
+### Data ###
 
+filepath = 'data/processed/reprocessed-data-renamed.csv'
+data = pd.read_csv(filepath, index_col=0)
+data.replace(0, np.nan, inplace=True)
+map_uniprot_gene = {k: v for k, v in zip(data.index, data.Gene)}
+logdata = np.log2(data.iloc[:, 2:-5].copy())
+# LYRIKS
+lyriks = logdata.iloc[:, logdata.columns.str.startswith('L')].copy()
+lyriks_full = lyriks.dropna()
+# CSA
+csa = logdata.iloc[:, logdata.columns.str.startswith('CA')].copy()
+bipolar = logdata.iloc[:, logdata.columns.str.startswith('A')].copy()
+
+# Integrating data and metadata
 lyriks_meta = lyriks_full.T.join(metadata_month, how='inner')
+csa_meta = csa.T.join(metadata_month, how='inner')
+
+
+##### Biomarker identification #####
+
+### Conversion signature ###
+
+# Load proteins (spearman's)
+file = 'outputs/tmp/cvt-spearman.csv'
+spearman_cvt = pd.read_csv(file, index_col=0)
+prots_spearman = spearman_cvt.index[abs(spearman_cvt.spearman_r) > 0.4]
+print(prots_spearman.shape)
 
 # # Identify the patient IDs of all timepoints from outliers
 # outliers = lyriks_meta.index[
@@ -80,6 +89,7 @@ lyriks_meta = lyriks_full.T.join(metadata_month, how='inner')
 #     (lyriks_meta.run_datetime > pd.to_datetime('2024-09-20 12:00:00'))
 # ]
 # outliers_sn = outliers.str.split('_').str[0] # ['L0626C', 'L0018C']
+
 
 ### Subset data ###
 
@@ -156,14 +166,15 @@ def plot_batch_effects_3d(df, prot, batch_colours, group_markers):
     return fig
 
 
-# prots_batch_effects = ['P02647', 'P00747']
-# dirpath = 'outputs/figs/trajectory/batch_effects/'
-# for prot in prots_batch_effects:
-#     fig = plot_batch_effects_2d(lyriks_meta, prot, batch_colours)
-#     filepath = os.path.join(dirpath, f'batch-lyriks387-{prot}.pdf')
-#     fig.savefig(filepath, dpi=300, bbox_inches='tight')
-#     print(filepath)
-# 
+prots_batch_effects = ['P02647', 'P00747']
+
+dirpath = 'outputs/figs/trajectory/batch_effects/'
+for prot in prots_spearman:
+    fig = plot_batch_effects_2d(bipolar_meta, prot, batch_colours)
+    filepath = os.path.join(dirpath, f'batch-bipolar-{prot}.pdf')
+    fig.savefig(filepath, dpi=300, bbox_inches='tight')
+    print(filepath)
+
 # for prot in prots_batch_effects:
 #     fig = plot_batch_effects_3d(
 #         lyriks_meta, prot, batch_colours, map_group_marker
@@ -172,6 +183,63 @@ def plot_batch_effects_3d(df, prot, batch_colours, group_markers):
 #     fig.savefig(filepath, dpi=300, bbox_inches='tight')
 #     print(filepath)
 
+metadata_month.columns
+metadata_lyriks = metadata_month[metadata_month.study == 'LYRIKS']
+metadata_month[metadata_month.group == 'Healthy control']
+
+# Determine number of bipolar samples
+n_bp = data.columns.str.startswith('A').sum()
+
+ctab = pd.crosstab(
+    metadata_month.group,
+    metadata_month.extraction_date
+)
+ctab.loc['Bipolar'] = 0
+ctab.loc['Bipolar', '28/8/24'] = n_bp
+filepath = 'outputs/ctab-group_extrdata.csv'
+ctab.to_csv(filepath)
+
+sns.scatterplot(
+    data=metadata_month,
+    x='run_datenum',
+    y='collection_datenum',
+    hue='extraction_date',
+    style='study',
+    alpha=0.7,
+    edgecolor=None,
+)
+filepath = 'outputs/figs/lyriks_csa-batch.pdf'
+plt.savefig(filepath, dpi=150, bbox_inches='tight')
+plt.show()
+
+filepath = 'data/metadata/metadata_experimental-all_645_13.csv'
+meta_expt = pd.read_csv(filepath, index_col=0)
+meta_expt['Run.DateTime'] = pd.to_datetime(
+    meta_expt['Run.DateTime'],
+    format='mixed'
+)
+# meta_expt['Run.DateNum'] = mdates.date2num(meta_expt.run_datetime)
+meta_expt.columns
+meta_expt[['Run.DateTime', 'Extraction.Date', 'Study']]
+
+extrdate_order = ['28/8/24', '4/9/24', '5/9/24', 'Not applicable']
+fig, ax = plt.subplots(figsize=(10, 3.5))
+sns.stripplot(
+    data=meta_expt,
+    x='Run.DateTime',
+    y='Extraction.Date',
+    order=extrdate_order,
+    hue='Study',
+    jitter=True,
+    alpha=0.7,
+    ax=ax,
+)
+ax.set_xlabel('Run DateTime')
+ax.set_ylabel('Extraction Date')
+plt.xticks(rotation=45, ha='right')
+plt.tight_layout()
+filepath = 'outputs/figs/run_datetime-extr_date.pdf'
+plt.savefig(filepath, dpi=150, bbox_inches='tight')
 
 ### Corrected data ###
 
@@ -302,17 +370,6 @@ def plot_trajectory(x):
     return pd.DataFrame(rows).set_index('uniprot')
 
 
-lyriks387_cb0409 = pd.read_csv(filepath, index_col=0)
-metadata3 = metadata_month[['group', 'month', 'timepoint']]
-lyriks387_meta3 = lyriks387_cb0409.T.join(metadata3, how='inner')
-
-# Load proteins (spearman's)
-file = 'outputs/tmp/cvt-spearman.csv'
-spearman_cvt = pd.read_csv(file, index_col=0)
-prots_spearman = spearman_cvt.index[abs(spearman_cvt.spearman_r) > 0.4]
-print(prots_spearman.shape)
-
-
 ### Plot ###
 
 ### Plot trajectories of patients across different groups ###
@@ -354,7 +411,7 @@ def plot_trajectory(x, feature, ylabel, batch_colours):
         cvt.loc[:, feature],
         c=cvt.extraction_date.map(batch_colours)
     )
-    ax1.set_title(f'Convert (r = {rho_cvt:.2f})')
+    ax1.set_title(f'Convert ($\rho$ = {rho_cvt:.2f})')
     ax1.set_xlabel("Months to conversion")
     ax1.set_ylabel(ylabel)
     for _, patient in cvt.sort_values("timepoint").groupby("sn"):
@@ -369,7 +426,7 @@ def plot_trajectory(x, feature, ylabel, batch_colours):
         mnt.loc[:, feature],
         c=mnt.extraction_date.map(batch_colours)
     )
-    ax2.set_title(f'Maintain (r = {rho_mnt:.2f})')
+    ax2.set_title(f'Maintain ($\rho$ = {rho_mnt:.2f})')
     ax2.set_xlabel("Timepoint")
     for _, patient in mnt.sort_values("timepoint").groupby("sn"):
         ax2.plot(
@@ -383,7 +440,7 @@ def plot_trajectory(x, feature, ylabel, batch_colours):
         ctrl.loc[:, feature],
         c=ctrl.extraction_date.map(batch_colours)
     )
-    ax3.set_title(f'Control (r = {rho_ctrl:.2f})')
+    ax3.set_title(f'Control ($\rho$ = {rho_ctrl:.2f})')
     ax3.set_xlabel("Timepoint")
     for _, patient in ctrl.sort_values("timepoint").groupby("sn"):
         ax3.plot(
@@ -397,7 +454,7 @@ def plot_trajectory(x, feature, ylabel, batch_colours):
         early.loc[:, feature],
         c=early.extraction_date.map(batch_colours)
     )
-    ax4.set_title(f'Early remit (r = {rho_early:.2f})')
+    ax4.set_title(f'Early remit ($\rho$ = {rho_early:.2f})')
     ax4.set_xlabel("Timepoint")
     ax4.set_ylabel(ylabel)
     for _, patient in early.sort_values("timepoint").groupby("sn"):
@@ -412,7 +469,7 @@ def plot_trajectory(x, feature, ylabel, batch_colours):
         late.loc[:, feature],
         c=late.extraction_date.map(batch_colours)
     )
-    ax5.set_title(f'Late remit (r = {rho_late:.2f})')
+    ax5.set_title(f'Late remit ($\rho$ = {rho_late:.2f})')
     ax5.set_xlabel("Timepoint")
     for _, patient in late.sort_values("timepoint").groupby("sn"):
         ax5.plot(
@@ -426,7 +483,7 @@ def plot_trajectory(x, feature, ylabel, batch_colours):
         relapse.loc[:, feature],
         c=relapse.extraction_date.map(batch_colours)
     )
-    ax6.set_title(f'Relapse (r = {rho_relapse:.2f})')
+    ax6.set_title(f'Relapse ($\rho$ = {rho_relapse:.2f})')
     ax6.set_xlabel("Timepoint")
     for _, patient in relapse.sort_values("timepoint").groupby("sn"):
         ax6.plot(
@@ -561,32 +618,69 @@ def plot_trajectory(x, feature, ylabel, batch_colours):
 
 ### Protein-protein correlations ###
 
-# TODO: Plot correlation
-
 group_order = [
     'Convert', 'Maintain', 'Control',
     'Early remit', 'Late remit', 'Relapse'
 ]
-
-metadata_month.group.value_counts()
-
+# Plot correlation between spearman8 proteins in different groups
 fig, axes = plt.subplots(2, 3, figsize=(18, 10))
 for ax, g in zip(axes.flat, group_order):
     df = bp.subset(lyriks387_cb0409, metadata_month, f"group == '{g}'").T
     df = df[prots_spearman]
+    df.columns = df.columns.map(map_uniprot_gene)
     corr = df.corr()
-    sns.heatmap(corr, cmap='coolwarm', vmin=-1, vmax=1, ax=ax)
-    ax.set_title(g)
+    mask = np.triu(np.ones_like(corr, dtype=bool))
+    lower = corr.values[np.tril(np.ones_like(corr, dtype=bool), k=-1)]
+    mean_r = lower.mean()
+    std_r = lower.std()
+    sns.heatmap(corr, mask=mask, cmap='coolwarm', vmin=-1, vmax=1, ax=ax)
+    ax.set_title(f"{g} (r = {mean_r:.3f} $\pm$ {std_r:.3f})")
 
 fig.tight_layout(pad=3.0)
 fig.savefig('outputs/figs/corrheatmap/corr-groups.pdf', bbox_inches='tight')
 plt.close(fig)
 
-# Plot correlation between spearman8 proteins in different groups
-lyriks_fep = bp.subset(
-    lyriks_cvt, metadata,
-    "(timepoint  == 24) & (state == 'FEP')"
+# Plot correlations in CSA
+group_order = ['Control', 'Schizophrenia']
+fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
+for ax, g in zip(axes.flat, group_order):
+    df = bp.subset(csa, metadata_month, f"state == '{g}'").T
+    df = df[prots_spearman]
+    df.columns = df.columns.map(map_uniprot_gene)
+    corr = df.corr()
+    mask = np.triu(np.ones_like(corr, dtype=bool))
+    lower = corr.values[np.tril(np.ones_like(corr, dtype=bool), k=-1)]
+    mean_r = lower.mean()
+    std_r = lower.std()
+    sns.heatmap(corr, mask=mask, cmap='coolwarm', vmin=-1, vmax=1, ax=ax)
+    ax.set_title(f"{g} (r = {mean_r:.3f} $\pm$ {std_r:.3f})")
+    ax.set_xlabel('')
+    ax.set_ylabel('')
+
+fig.tight_layout(pad=3.0)
+fig.savefig('outputs/figs/corrheatmap/corr-groups-csa.pdf', bbox_inches='tight')
+plt.close(fig)
+
+# Plot correlations in bipolar
+
+fig, ax = plt.subplots(1, 1, figsize=(5, 4.5))
+df = bipolar.T[prots_spearman]
+df.columns = df.columns.map(map_uniprot_gene)
+corr = df.corr()
+mask = np.triu(np.ones_like(corr, dtype=bool))
+lower = corr.values[np.tril(np.ones_like(corr, dtype=bool), k=-1)]
+mean_r = lower.mean()
+std_r = lower.std()
+sns.heatmap(corr, mask=mask, cmap='coolwarm', vmin=-1, vmax=1, ax=ax)
+ax.set_title(f"Bipolar (r = {mean_r:.3f} $\pm$ {std_r:.3f})")
+ax.set_xlabel('')
+ax.set_ylabel('')
+fig.tight_layout(pad=3.0)
+fig.savefig(
+    'outputs/figs/corrheatmap/corr-groups-bipolar.pdf',
+    bbox_inches='tight'
 )
+plt.close(fig)
 
 ### Slopes ###
 
