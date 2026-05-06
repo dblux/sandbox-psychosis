@@ -1,5 +1,6 @@
 import os
 import pickle
+import itertools
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
@@ -54,6 +55,7 @@ metadata_month.loc[
     (metadata_month.month.isna()) & (metadata_month.study == 'LYRIKS'),
     'timepoint'
 ]
+
 
 ### Data ###
 
@@ -303,34 +305,6 @@ lyriks387cb_meta3 = lyriks387_cb0409.T.join(
 # print(filepath)
 
 
-def compute_rho(x):
-    '''Compute rho for all proteins across all groups of patients
-
-    Args:
-        x: DataFrame with shape sample x feature. Features include proteins
-        and group, month and timepoint
-    '''
-    cvt = x[x.group == 'Convert']
-    mnt = x[x.group == 'Maintain']
-    ctrl = x[x.group == 'Control']
-    early = x[x.group == 'Early remit']
-    late = x[x.group == 'Late remit']
-    relapse = x[x.group == 'Relapse']
-    rows = []
-    for uid in x.columns[:-3]:
-        print(uid)
-        rows.append({
-            'uniprot': uid,
-            'rho_cvt': spearmanr(cvt.month, cvt.loc[:, uid]).correlation,
-            'rho_mnt': spearmanr(mnt.timepoint, mnt.loc[:, uid]).correlation,
-            'rho_ctrl': spearmanr(ctrl.timepoint, ctrl.loc[:, uid]).correlation,
-            'rho_early': spearmanr(early.timepoint, early.loc[:, uid]).correlation,
-            'rho_late': spearmanr(late.timepoint, late.loc[:, uid]).correlation,
-            'rho_relapse': spearmanr(relapse.timepoint, relapse.loc[:, uid]).correlation,
-        })
-    return pd.DataFrame(rows).set_index('uniprot')
-
-
 ### Plot trajectories ###
 
 ### Plot trajectories of patients across different groups ###
@@ -468,6 +442,10 @@ filepath = 'data/etc/biomarkers-elasticnet.csv'
 bm_enet = pd.read_csv(filepath, index_col=0)
 uid_enet = bm_enet.index
 
+set_spearman = set(prots_spearman)
+set_mongan = set(uid_mongan)
+set_ancova_enet = set(uid_ancova) | set(uid_enet)
+
 # Only proteins with no missing values were used
 # Prognostic biomarkers were identified from imputed data
 print(uid_mongan.isin(lyriks387_cb0409.index).sum())
@@ -496,10 +474,6 @@ for prot in uid_enet:
         plt.close()
 
 
-set_spearman = set(prots_spearman)
-set_mongan = set(uid_mongan)
-set_ancova_enet = set(uid_ancova) | set(uid_enet)
-
 fig, ax = plt.subplots(figsize=(6, 6))
 venn3(
     [set_spearman, set_mongan, set_ancova_enet],
@@ -512,11 +486,36 @@ filepath = 'outputs/figs/trajectory/venn_protein_sets.pdf'
 plt.savefig(filepath, dpi=300, bbox_inches='tight')
 plt.close()
 
-# When do we use these null distributions? When theoretical distributions
-# may not apply.
-# TODO: Null distribution of mean abs rho of 8 random proteins
 
-# # Calculate mean absolute rho value from each set
+### Calculate mean absolute rho value from each subgroup ###
+
+def compute_rho(x):
+    '''Compute rho for all proteins across all groups of patients
+
+    Args:
+        x: DataFrame with shape sample x feature. Features include proteins
+        and group, month and timepoint
+    '''
+    cvt = x[x.group == 'Convert']
+    mnt = x[x.group == 'Maintain']
+    ctrl = x[x.group == 'Control']
+    early = x[x.group == 'Early remit']
+    late = x[x.group == 'Late remit']
+    relapse = x[x.group == 'Relapse']
+    rows = []
+    for uid in x.columns[:-3]:
+        print(uid)
+        rows.append({
+            'uniprot': uid,
+            'rho_cvt': spearmanr(cvt.month, cvt.loc[:, uid]).correlation,
+            'rho_mnt': spearmanr(mnt.timepoint, mnt.loc[:, uid]).correlation,
+            'rho_ctrl': spearmanr(ctrl.timepoint, ctrl.loc[:, uid]).correlation,
+            'rho_early': spearmanr(early.timepoint, early.loc[:, uid]).correlation,
+            'rho_late': spearmanr(late.timepoint, late.loc[:, uid]).correlation,
+            'rho_relapse': spearmanr(relapse.timepoint, relapse.loc[:, uid]).correlation,
+        })
+    return pd.DataFrame(rows).set_index('uniprot')
+
 # rhos = compute_rho(lyriks387cb_meta3)
 # rhos.insert(0, 'Description', rhos.index.map(map_uniprot_description))
 # rhos.insert(0, 'Gene', rhos.index.map(map_uniprot_gene))
@@ -526,6 +525,11 @@ plt.close()
 filepath = 'outputs/tmp/rhos.csv'
 rhos = pd.read_csv(filepath, index_col=0)
 rhos.head()
+
+
+# TODO: Compute rho for all possible pairs of proteins in CSA?
+# TODO: Filter for high rhos?
+# TODO: See whether they are biologically related to spearman8?
 
 ### Null distribution ###
 
@@ -569,14 +573,45 @@ map_labels = {
 }
 
 rhos = rhos.drop(columns='Description')
-rhos = rhos.iloc[:, [0, 1, 3, 2, 4, 5, 6]]
+rhos = rhos.iloc[:, [0, 1, 3, 2, 4, 5]]
+rhos.head()
 
-prots = uid_ancova.union(uid_enet)[uid_ancova.union(uid_enet).isin(rhos.index)]
-hm_data = rhos.loc[prots, :]
-hm_data = hm_data.set_index('Gene').T
-hm_data.index = hm_data.index.map(map_labels)
 
-fig, ax = plt.subplots(figsize=(9, 4))
+### Spearman's ###
+
+hm_data = rhos.loc[prots_spearman, :]
+hm_data = hm_data.set_index('Gene')
+hm_data.columns = hm_data.columns.map(map_labels)
+
+fig, ax = plt.subplots(figsize=(5, 4.9))
+sns.heatmap(
+    hm_data,
+    cmap='RdBu',
+    center=0,
+    vmin=-1, vmax=1,
+    annot=True,
+    fmt='.2f',
+    linewidths=0.5,
+    ax=ax
+)
+ax.set_xlabel('')
+ax.set_ylabel('')
+plt.tight_layout()
+filepath = 'outputs/figs/trajectory/heatmap-rhos-spearman.pdf' 
+plt.savefig(filepath, dpi=150, bbox_inches='tight')
+plt.close()
+
+
+### TP ###
+
+chan_present = uid_ancova.union(uid_enet)[
+    uid_ancova.union(uid_enet).isin(rhos.index)
+]
+hm_data = rhos.loc[chan_present, :]
+hm_data = hm_data.set_index('Gene')
+hm_data.columns = hm_data.columns.map(map_labels)
+
+fig, ax = plt.subplots(figsize=(5, 8))
 sns.heatmap(
     hm_data,
     cmap='RdBu',
@@ -591,6 +626,32 @@ ax.set_xlabel('')
 ax.set_ylabel('')
 plt.tight_layout()
 filepath = 'outputs/figs/trajectory/heatmap-rhos-tp.pdf' 
+plt.savefig(filepath, dpi=150, bbox_inches='tight')
+plt.close()
+
+
+### Mongan ###
+
+prots = uid_mongan[uid_mongan.isin(rhos.index) & ~uid_mongan.isin(chan_present)]
+hm_data = rhos.loc[prots, :]
+hm_data = hm_data.set_index('Gene')
+hm_data.columns = hm_data.columns.map(map_labels)
+
+fig, ax = plt.subplots(figsize=(5, 12))
+sns.heatmap(
+    hm_data,
+    cmap='RdBu',
+    center=0,
+    vmin=-1, vmax=1,
+    annot=True,
+    fmt='.2f',
+    linewidths=0.5,
+    ax=ax
+)
+ax.set_xlabel('')
+ax.set_ylabel('')
+plt.tight_layout()
+filepath = 'outputs/figs/trajectory/heatmap-rhos-mongan.pdf' 
 plt.savefig(filepath, dpi=150, bbox_inches='tight')
 plt.close()
 
@@ -675,7 +736,6 @@ plt.close()
 # TODO: Functional enrichment analysis
 
 # ### CCA ###
-# 
 # # ### Plot CCA trajectory ###
 # # 
 # # cca_scores = pd.read_csv('data/tmp/zhihao/cca_m2c-scores.csv')
@@ -777,13 +837,14 @@ plt.close()
 
 ### Protein-protein correlations ###
 
-group_order = [
+groups_lyriks = [
     'Convert', 'Maintain', 'Control',
     'Early remit', 'Late remit', 'Relapse'
 ]
+
 # Plot correlation between spearman8 proteins in different groups
 fig, axes = plt.subplots(2, 3, figsize=(18, 10))
-for ax, g in zip(axes.flat, group_order):
+for ax, g in zip(axes.flat, groups_lyriks):
     df = bp.subset(lyriks387_cb0409, metadata_month, f"group == '{g}'").T
     df = df[prots_spearman]
     df.columns = df.columns.map(map_uniprot_gene)
@@ -803,19 +864,19 @@ fig.tight_layout(pad=3.0)
 fig.savefig('outputs/figs/corrheatmap/corr-groups.pdf', bbox_inches='tight')
 plt.close(fig)
 
-
 metadata_month.columns
 metadata_month.group.value_counts()
 metadata_month.state.value_counts()
 metadata_month.loc[metadata_month.study == 'SCZ', 'group']
 
 # Plot correlations in CSA
-group_order = [
+groups_csa = [
     'Healthy control', 'Antipsychotic responsive',
     'Clozapine responsive', 'Clozapine resistant'
 ]
+
 fig, axes = plt.subplots(2, 2, figsize=(11, 10))
-for ax, g in zip(axes.flat, group_order):
+for ax, g in zip(axes.flat, groups_csa):
     df = bp.subset(csa, metadata_month, f"group == '{g}'").T
     df = df[prots_spearman]
     df.columns = df.columns.map(map_uniprot_gene)
@@ -861,6 +922,72 @@ fig.savefig(
     'outputs/figs/corrheatmap/corr-groups-bipolar.pdf',
     bbox_inches='tight'
 )
+plt.close(fig)
+
+
+# Plot: Jitter plot of all protein-protein correlations across studies and groups
+def _collate_corr(X, metadata, study, groups):
+    records = []
+    if groups is None:
+        df = X.T[prots_spearman]
+        df.columns = df.columns.map(map_uniprot_gene)
+        corr = df.corr()
+        for i in range(len(corr)):
+            for j in range(i):
+                pair = f"{corr.index[i]}-{corr.columns[j]}"
+                records.append((study, study, pair, corr.iloc[i, j]))
+        return records
+    for g in groups:
+        df = bp.subset(X, metadata, f"group == '{g}'").T
+        df = df[prots_spearman]
+        df.columns = df.columns.map(map_uniprot_gene)
+        corr = df.corr()
+        for i in range(len(corr)):
+            for j in range(i):
+                pair = f"{corr.index[i]}-{corr.columns[j]}"
+                records.append((study, g, pair, corr.iloc[i, j]))
+    return records
+
+corr_records = []
+corr_records += _collate_corr(
+    lyriks387_cb0409, metadata_month, 'LYRIKS', groups_lyriks
+)
+corr_records += _collate_corr(
+    csa, metadata_month, 'CSA', groups_csa
+)
+corr_records += _collate_corr(bipolar, None, 'Bipolar', None)
+
+rhos_long = pd.DataFrame(
+    corr_records, columns=['Study', 'Group', 'Pair', 'Rho']
+)
+
+fig, axes = plt.subplots(
+    1, 3, figsize=(13, 4),
+    gridspec_kw={'width_ratios': [6, 4, 1]},
+    sharey=True
+)
+panels = [
+    ('LYRIKS', groups_lyriks),
+    ('CSA',    groups_csa),
+    ('Bipolar', ['Bipolar']),
+]
+for ax, (study, groups) in zip(axes, panels):
+    sns.stripplot(
+        data=rhos_long[rhos_long.Study == study],
+        x='Group', y='Rho', order=groups,
+        jitter=True, alpha=0.7, ax=ax
+    )
+    ax.axhline(0, color='gray', linestyle='--', linewidth=0.8)
+    ax.set_title(study)
+    ax.set_xlabel('')
+    ax.tick_params(axis='x', rotation=15)
+
+axes[0].set_ylabel(r'$\rho$')
+for ax in axes[1:]:
+    ax.set_ylabel('')
+
+fig.tight_layout()
+fig.savefig('outputs/figs/corrheatmap/corr-jitter.pdf', bbox_inches='tight')
 plt.close(fig)
 
 
@@ -932,6 +1059,40 @@ def compute_sd(X_meta):
 def compute_cv(X_meta):
     X = X_meta.iloc[:, :-2]
     return X.std(axis=0, ddof=1) / X.mean(axis=0)
+
+
+### CSA: Correlations ###
+
+# Collection date might have a bigger impact than drug response
+csa_full = csa.dropna()
+
+# TODO: Plot correlation within subgroups (spearman's 8)
+csa_spearman = csa.loc[prots_spearman].T.join(
+    metadata_month[[
+        'run_datenum', 'collection_datenum', 'group'
+    ]], how='inner'
+)
+
+for p1, p2 in itertools.combinations(prots_spearman, 2):
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8), sharex=True, sharey=True)
+    for ax, gname in zip(axes.flatten(), groups_csa):
+        scatter_df = csa_spearman[csa_spearman['group'] == gname]
+        ax.scatter(
+            scatter_df[p1],
+            scatter_df[p2],
+            c=scatter_df['run_datenum'],
+            cmap='viridis',
+            alpha=0.7,
+        )
+        plt.colorbar(sc, ax=ax, label='Run date')
+        ax.set_xlabel(p1)
+        ax.set_ylabel(p2)
+        ax.set_title(gname)
+    fig.tight_layout()
+    # gname_slug = gname.lower().replace(' ', '_')
+    filepath = f'outputs/figs/corr/scatter-rundate-{p1}-{p2}.pdf'
+    fig.savefig(filepath, bbox_inches='tight')
+    plt.close(fig)
 
 
 # ### Old code ###
