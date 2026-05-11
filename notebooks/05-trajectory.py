@@ -8,6 +8,9 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import seaborn as sns
+
+from scipy import stats
+from itertools import combinations
 from scipy.stats import spearmanr, ttest_rel, kendalltau, f_oneway
 from statsmodels.formula.api import ols
 from statsmodels.stats.multitest import multipletests
@@ -71,8 +74,10 @@ lyriks_full = lyriks.dropna()
 # CSA
 csa = logdata.iloc[:, logdata.columns.str.startswith('CA')].copy()
 bipolar = logdata.iloc[:, logdata.columns.str.startswith('A')].copy()
+csabp = pd.concat([csa, bipolar], axis=1)
 
 # Integrating data and metadata
+
 lyriks_meta = lyriks_full.T.join(metadata_month, how='inner')
 csa_meta = csa.T.join(metadata_month, how='inner')
 
@@ -97,7 +102,7 @@ sns.scatterplot(
     data=metadata_month,
     x='run_datenum',
     y='collection_datenum',
-    hue='extraction_date    ',
+    hue='extraction_date',
     style='study',
     alpha=0.7,
     edgecolor=None,
@@ -145,6 +150,76 @@ file = 'outputs/tmp/cvt-spearman.csv'
 spearman_cvt = pd.read_csv(file, index_col=0)
 prots_spearman = spearman_cvt.index[abs(spearman_cvt.spearman_r) > 0.4]
 print(prots_spearman.shape)
+
+# Plot protein expression of spearman8 in CSA and bipolar
+metadata_all = metadata[['study', 'group', 'extraction_date']].copy()
+# Bipolar metadata
+metadata_bp = pd.DataFrame({
+    'study': 'ABIGNET',
+    'group': 'Bipolar 1',
+    'extraction_date': '4/9/24',
+}, index=bipolar.columns)
+metadata_all = pd.concat([metadata_all, metadata_bp])
+metadata_all1 = metadata_all.copy()
+
+metadata_all1.group.replace({
+    'Antipsychotic responsive': 'Schizophrenia',
+    'Clozapine responsive': 'Schizophrenia',
+    'Clozapine resistant': 'Schizophrenia',
+}, inplace=True)
+
+csabp_meta = csabp.T.join(metadata_all, how='inner')
+csabp_meta1 = csabp.T.join(metadata_all1, how='inner')
+
+for prot in prots_spearman:
+    fig, ax = plt.subplots(figsize=(6, 4))
+    sns.stripplot(
+        data=csabp_meta1,
+        x='group',
+        y=prot,
+        hue='extraction_date',
+        ax=ax
+    )
+    ax.tick_params(axis='x', rotation=20)
+    filepath = f'outputs/figs/expression/stripplot-{prot}.pdf'
+    plt.savefig(filepath, bbox_inches='tight')
+
+for prot in prots_spearman:
+    fig, ax = plt.subplots(figsize=(6, 4))
+    sns.stripplot(
+        data=csabp_meta1,
+        x='group',
+        y=prot,
+        hue='extraction_date',
+        ax=ax
+    )
+    ax.tick_params(axis='x', rotation=20)
+    filepath = f'outputs/figs/expression/stripplot1-{prot}.pdf'
+    plt.savefig(filepath, bbox_inches='tight')
+
+
+# TODO: Plot expression ratios
+pairs = list(combinations(prots_spearman, 2))
+ratio_data = {
+    f'{p1}_{p2}': csabp.loc[p1] / csabp.loc[p2]
+    for p1, p2 in pairs
+}
+csabp_ratios = pd.DataFrame(ratio_data)  # samples x pairs
+csabp_ratios_meta = csabp_ratios.join(metadata_all, how='inner')
+for pair in csabp_ratios.columns:
+    fig, ax = plt.subplots(figsize=(6, 4))
+    sns.stripplot(
+        data=csabp_ratios_meta,
+        x='group',
+        y=pair,
+        hue='extraction_date',
+        ax=ax
+    )
+    ax.tick_params(axis='x', rotation=20)
+    filepath = f'outputs/figs/expression/stripplot-ratios-{pair}.pdf'
+    plt.savefig(filepath, bbox_inches='tight')
+    print(filepath)
+
 
 # # Identify the patient IDs of all timepoints from outliers
 # outliers = lyriks_meta.index[
@@ -924,6 +999,40 @@ fig.savefig(
 )
 plt.close(fig)
 
+# TODO: Plot individual correlation for convert patients with >3 TP
+cvt_counts = metadata_month[
+    metadata_month['group'] == 'Convert'
+].groupby('sn').size()
+cvt_pids = cvt_counts.index[cvt_counts > 3]
+
+metadata_month.loc[
+    metadata_month.group == 'Convert',
+    ['month_of_conversion', 'month']
+]
+
+for sn in cvt_pids:
+    print(sn)
+    for i in range(3):
+        data = lyriks387_cb0409.loc[
+            lyriks387_cb0409.index.isin(prots_spearman),
+            lyriks387_cb0409.columns.str.startswith(sn)
+        ].T
+        nrow = data.shape[0] - i
+        data = data.iloc[:nrow, :]
+        data.columns = data.columns.map(map_uniprot_gene)
+        corr = data.corr()
+        mask = np.triu(np.ones_like(corr, dtype=bool))
+        lower = corr.values[np.tril(np.ones_like(corr, dtype=bool), k=-1)]
+        fig, ax = plt.subplots(figsize=(6.5, 5))
+        sns.heatmap(
+            corr, mask=mask, cmap='coolwarm',
+            annot=True, fmt='.2f',
+            vmin=-1, vmax=1, ax=ax
+        )
+        ax.set_title(f'{sn} ({nrow} timepoints)')
+        filepath = f'outputs/figs/corr/corr-{sn}-{nrow}.pdf'
+        fig.savefig(filepath, bbox_inches='tight')
+        plt.close(fig)
 
 # Plot: Jitter plot of all protein-protein correlations across studies and groups
 def _collate_corr(X, metadata, study, groups):
@@ -961,6 +1070,7 @@ rhos_long = pd.DataFrame(
     corr_records, columns=['Study', 'Group', 'Pair', 'Rho']
 )
 
+# Plot jitter plots of correlation coefficients across patient groups
 fig, axes = plt.subplots(
     1, 3, figsize=(13, 4),
     gridspec_kw={'width_ratios': [6, 4, 1]},
@@ -990,12 +1100,75 @@ fig.tight_layout()
 fig.savefig('outputs/figs/corrheatmap/corr-jitter.pdf', bbox_inches='tight')
 plt.close(fig)
 
+# Plot confidence intervals of each patient group
+def _rho_ci(x, confidence=0.95):
+    n = len(x)
+    m = x.mean()
+    h = stats.t.interval(confidence, df=n - 1, loc=m, scale=stats.sem(x))
+    return pd.Series({'mean': m, 'low': h[0], 'high': h[1]})
+
+ci_df = (
+    rhos_long
+        .groupby(['Study', 'Group'])['Rho']
+        .apply(_rho_ci)
+        .unstack()
+)
+
+# fig, axes = plt.subplots(
+#     3, 1, figsize=(6, 6),
+#     gridspec_kw={'height_ratios': [6, 4, 1]},
+#     sharex=True
+# )
+# panels = [
+#     ('LYRIKS', groups_lyriks),
+#     ('CSA',    groups_csa),
+#     ('Bipolar', ['Bipolar']),
+# ]
+# for ax, (study, groups) in zip(axes, panels):
+#     df = ci_df.loc[study].reindex(groups)
+#     ax.errorbar(
+#         x=df['mean'], y=groups,
+#         xerr=[df['mean'] - df['low'], df['high'] - df['mean']],
+#         fmt='o', capsize=4
+#     )
+#     ax.axvline(0, color='gray', linestyle='--', linewidth=0.8)
+#     ax.margins(y=0.2)
+#     ax.set_title(study)
+#     ax.set_xlabel(r'$\rho$')
+#     ax.set_ylabel('')
+# 
+# fig.tight_layout()
+# filepath = 'outputs/figs/corr/corr-ci.pdf'
+# fig.savefig(filepath, bbox_inches='tight')
+# plt.close(fig)
+# print(filepath)
+
+fig, ax = plt.subplots(figsize=(5, 3))
+df = ci_df.loc['LYRIKS'].reindex(groups_lyriks)
+ax.errorbar(
+    x=df['mean'], y=groups_lyriks,
+    xerr=[df['mean'] - df['low'], df['high'] - df['mean']],
+    fmt='o', capsize=4
+)
+ax.axvline(0, color='gray', linestyle='--', linewidth=0.8)
+ax.margins(y=0.2)
+ax.set_title('LYRIKS')
+ax.set_xlabel(r'$\rho$')
+ax.set_ylabel('Group')
+fig.tight_layout()
+filepath = 'outputs/figs/corr/corr-ci-lyriks.pdf'
+fig.savefig(filepath, bbox_inches='tight')
+plt.close(fig)
+print(filepath)
+
 
 ### Slopes ###
 
 def compute_slope_features(
-    X: pd.DataFrame, metadata: pd.DataFrame, func: callable
-):
+    X: pd.DataFrame,
+    metadata: pd.DataFrame,
+    func: callable
+) -> pd.DataFrame:
     '''Computes slope features for every protein using func
 
     Args:
@@ -1095,30 +1268,7 @@ for p1, p2 in itertools.combinations(prots_spearman, 2):
     plt.close(fig)
 
 
-# ### Old code ###
-# 
-# def compute_velocity1(X_meta):
-#     X = X_meta.iloc[:, :-2]
-#     duration = X_meta['month'][-1] - X_meta['month'][0]
-#     velocity = (X.iloc[-1,:] - X.iloc[0,:]) / duration
-#     print(type(velocity))
-#     return velocity
-# 
-# 
-# def compute_speed1(X_meta):
-#     X = X_meta.iloc[:, :-2]
-#     duration = X_meta['month'][-1] - X_meta['month'][0]
-#     speed = np.abs(np.diff(X, axis=0)).sum(axis=0) / duration
-#     return pd.Series(speed, index=X.columns)
-# 
-# 
-# def compute_kendall_tau1(X_meta):
-#     X = X_meta.iloc[:, :-2]
-#     ranks = np.arange(len(X))
-#     return X.apply(lambda col: kendalltau(ranks, col.values).statistic)
-
-
-### New
+### Compute slope features ###
 
 taus = compute_slope_features(
     lyriks387_cb0409, metadata_month, compute_kendall_tau
@@ -1130,23 +1280,10 @@ speeds = compute_slope_features(
     lyriks387_cb0409, metadata_month, compute_speed
 )
 
-# ### Old
-# 
-# velocities1 = compute_slope_features(
-#     lyriks387_cb0409, metadata_month, compute_velocity1
-# )
-# speeds1 = compute_slope_features(
-#     lyriks387_cb0409, metadata_month, compute_speed1
-# )
-# taus1 = compute_slope_features(
-#     lyriks387_cb0409, metadata_month, compute_kendall_tau1
-# )
-
 velocities24 = velocities.groupby(level='sn').nth(0).droplevel(-1)
 speeds24 = speeds.groupby(level='sn').nth(0).droplevel(-1)
 taus24 = taus.groupby(level='sn').nth(0).droplevel(-1)
 rel_velocities24 = velocities24 / speeds24
-
 
 sn_group = metadata_month[['sn', 'group']].drop_duplicates('sn').set_index('sn')
 
