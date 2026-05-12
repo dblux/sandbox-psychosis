@@ -741,7 +741,6 @@ fig, axes = plt.subplots(
     figsize=(n_cols * 3.5, n_rows * 2.5)
 )
 
-
 axes = axes.flatten()
 for i, uid in enumerate(prots_spearman):
     ax = axes[i]
@@ -939,10 +938,39 @@ fig.tight_layout(pad=3.0)
 fig.savefig('outputs/figs/corrheatmap/corr-groups.pdf', bbox_inches='tight')
 plt.close(fig)
 
-metadata_month.columns
-metadata_month.group.value_counts()
-metadata_month.state.value_counts()
-metadata_month.loc[metadata_month.study == 'SCZ', 'group']
+# TODO: Plot correlations in convert group
+# TODO: Check state of L0609S_6
+
+metadata_cvt = metadata_month.loc[
+    metadata_month.group == 'Convert',
+    ['sn', 'timepoint', 'group', 'state']
+]
+idx_cvt = (
+    metadata_cvt
+        .groupby('sn')
+        .apply(lambda g: g.iloc[:-1])
+        .index.get_level_values(1)
+)
+
+cvt_no_fep = lyriks387_cb0409.loc[prots_spearman, idx_cvt].T
+cvt_no_fep.columns = cvt_no_fep.columns.map(map_uniprot_gene)
+corr = cvt_no_fep.corr()
+mask = np.triu(np.ones_like(corr, dtype=bool))
+lower = corr.values[np.tril(np.ones_like(corr, dtype=bool), k=-1)]
+mean_r = lower.mean()
+std_r = lower.std()
+fig, ax = plt.subplots(figsize=(6, 4.9))
+sns.heatmap(
+    corr, mask=mask, cmap='coolwarm',
+    annot=True, fmt='.2f',
+    vmin=-1, vmax=1,
+    ax=ax
+)
+ax.set_title(rf"Convert ($\rho$ = {mean_r:.3f} $\pm$ {std_r:.3f})")
+fig.tight_layout(pad=3.0)
+fig.savefig('outputs/figs/corr/corr-cvt_no_fep.pdf', bbox_inches='tight')
+plt.close(fig)
+
 
 # Plot correlations in CSA
 groups_csa = [
@@ -1010,6 +1038,7 @@ metadata_month.loc[
     ['month_of_conversion', 'month']
 ]
 
+records = []
 for sn in cvt_pids:
     print(sn)
     for i in range(3):
@@ -1033,6 +1062,97 @@ for sn in cvt_pids:
         filepath = f'outputs/figs/corr/corr-{sn}-{nrow}.pdf'
         fig.savefig(filepath, bbox_inches='tight')
         plt.close(fig)
+        pairs = [
+            f"{corr.index[r]}_{corr.columns[c]}"
+            for r in range(len(corr))
+            for c in range(r)
+        ]
+        for pairname, rho in zip(pairs, lower):
+            records.append((sn, nrow, pairname, rho))
+
+corr_cvt = pd.DataFrame(records, columns=['pid', 'ntimepoints', 'pair', 'rho'])
+corr_cvt['ntimepoints'] = corr_cvt['ntimepoints'].astype('category')
+
+# TODO: Plot correlations jitter plot of patient at individual timepoints
+for pid in cvt_pids:
+    corr_pid = corr_cvt[corr_cvt.pid == pid]
+    corr_pid.ntimepoints = corr_pid.ntimepoints.cat.remove_unused_categories()
+    fig, ax = plt.subplots(figsize=(5, 3))
+    sns.stripplot(
+        corr_pid,
+        x='rho',
+        y='ntimepoints',
+        ax=ax
+    )
+    ax.set_ylabel('No. of timepoints')
+    ax.axvline(0, color='grey', linestyle='--', linewidth=0.8)
+    ax.tick_params(axis='x', rotation=15)
+    filepath = f'outputs/figs/corr/stripplot-{pid}.pdf'
+    plt.savefig(filepath, bbox_inches='tight')
+    print(filepath)
+
+# Plot confidence intervals of each patient group
+def _rho_ci(x, confidence=0.95):
+    n = len(x)
+    m = x.mean()
+    h = stats.t.interval(confidence, df=n - 1, loc=m, scale=stats.sem(x))
+    return pd.Series({'mean': m, 'low': h[0], 'high': h[1]})
+
+ci_df = (
+    rhos_long
+        .groupby(['Study', 'Group'])['Rho']
+        .apply(_rho_ci)
+        .unstack()
+)
+
+fig, ax = plt.subplots(figsize=(5, 3))
+df = ci_df.loc['LYRIKS'].reindex(groups_lyriks)
+ax.errorbar(
+    x=df['mean'], y=groups_lyriks,
+    xerr=[df['mean'] - df['low'], df['high'] - df['mean']],
+    fmt='o', capsize=4
+)
+ax.axvline(0, color='gray', linestyle='--', linewidth=0.8)
+ax.margins(y=0.2)
+ax.set_title('LYRIKS')
+ax.set_xlabel(r'$\rho$')
+ax.set_ylabel('Group')
+fig.tight_layout()
+filepath = 'outputs/figs/corr/corr-ci-lyriks.pdf'
+fig.savefig(filepath, bbox_inches='tight')
+plt.close(fig)
+print(filepath)
+
+### CI for all datasets
+# fig, axes = plt.subplots(
+#     3, 1, figsize=(6, 6),
+#     gridspec_kw={'height_ratios': [6, 4, 1]},
+#     sharex=True
+# )
+# panels = [
+#     ('LYRIKS', groups_lyriks),
+#     ('CSA',    groups_csa),
+#     ('Bipolar', ['Bipolar']),
+# ]
+# for ax, (study, groups) in zip(axes, panels):
+#     df = ci_df.loc[study].reindex(groups)
+#     ax.errorbar(
+#         x=df['mean'], y=groups,
+#         xerr=[df['mean'] - df['low'], df['high'] - df['mean']],
+#         fmt='o', capsize=4
+#     )
+#     ax.axvline(0, color='gray', linestyle='--', linewidth=0.8)
+#     ax.margins(y=0.2)
+#     ax.set_title(study)
+#     ax.set_xlabel(r'$\rho$')
+#     ax.set_ylabel('')
+# 
+# fig.tight_layout()
+# filepath = 'outputs/figs/corr/corr-ci.pdf'
+# fig.savefig(filepath, bbox_inches='tight')
+# plt.close(fig)
+# print(filepath)
+
 
 # Plot: Jitter plot of all protein-protein correlations across studies and groups
 def _collate_corr(X, metadata, study, groups):
@@ -1100,66 +1220,6 @@ fig.tight_layout()
 fig.savefig('outputs/figs/corrheatmap/corr-jitter.pdf', bbox_inches='tight')
 plt.close(fig)
 
-# Plot confidence intervals of each patient group
-def _rho_ci(x, confidence=0.95):
-    n = len(x)
-    m = x.mean()
-    h = stats.t.interval(confidence, df=n - 1, loc=m, scale=stats.sem(x))
-    return pd.Series({'mean': m, 'low': h[0], 'high': h[1]})
-
-ci_df = (
-    rhos_long
-        .groupby(['Study', 'Group'])['Rho']
-        .apply(_rho_ci)
-        .unstack()
-)
-
-# fig, axes = plt.subplots(
-#     3, 1, figsize=(6, 6),
-#     gridspec_kw={'height_ratios': [6, 4, 1]},
-#     sharex=True
-# )
-# panels = [
-#     ('LYRIKS', groups_lyriks),
-#     ('CSA',    groups_csa),
-#     ('Bipolar', ['Bipolar']),
-# ]
-# for ax, (study, groups) in zip(axes, panels):
-#     df = ci_df.loc[study].reindex(groups)
-#     ax.errorbar(
-#         x=df['mean'], y=groups,
-#         xerr=[df['mean'] - df['low'], df['high'] - df['mean']],
-#         fmt='o', capsize=4
-#     )
-#     ax.axvline(0, color='gray', linestyle='--', linewidth=0.8)
-#     ax.margins(y=0.2)
-#     ax.set_title(study)
-#     ax.set_xlabel(r'$\rho$')
-#     ax.set_ylabel('')
-# 
-# fig.tight_layout()
-# filepath = 'outputs/figs/corr/corr-ci.pdf'
-# fig.savefig(filepath, bbox_inches='tight')
-# plt.close(fig)
-# print(filepath)
-
-fig, ax = plt.subplots(figsize=(5, 3))
-df = ci_df.loc['LYRIKS'].reindex(groups_lyriks)
-ax.errorbar(
-    x=df['mean'], y=groups_lyriks,
-    xerr=[df['mean'] - df['low'], df['high'] - df['mean']],
-    fmt='o', capsize=4
-)
-ax.axvline(0, color='gray', linestyle='--', linewidth=0.8)
-ax.margins(y=0.2)
-ax.set_title('LYRIKS')
-ax.set_xlabel(r'$\rho$')
-ax.set_ylabel('Group')
-fig.tight_layout()
-filepath = 'outputs/figs/corr/corr-ci-lyriks.pdf'
-fig.savefig(filepath, bbox_inches='tight')
-plt.close(fig)
-print(filepath)
 
 
 ### Slopes ###
