@@ -11,12 +11,13 @@ import seaborn as sns
 
 from scipy import stats
 from itertools import combinations
-from scipy.stats import spearmanr, ttest_ind, ttest_rel, kendalltau, f_oneway
+from scipy.stats import spearmanr, ttest_rel, kendalltau, f_oneway
 from statsmodels.formula.api import ols
 from statsmodels.stats.multitest import multipletests
 from sklearn.decomposition import PCA
 from matplotlib.lines import Line2D
 from matplotlib_venn import venn3
+
 import biopy.utils as bp
 
 ### Metadata ###
@@ -87,7 +88,6 @@ metadata_lyriks = metadata_month[metadata_month.study == 'LYRIKS']
 
 # Determine number of bipolar samples
 n_bp = data.columns.str.startswith('A').sum()
-
 ctab = pd.crosstab(
     metadata_month.group,
     metadata_month.extraction_date
@@ -150,363 +150,6 @@ spearman_cvt = pd.read_csv(file, index_col=0)
 prots_spearman = spearman_cvt.index[abs(spearman_cvt.spearman_r) > 0.4]
 print(prots_spearman.shape)
 
-# Plot protein expression of spearman8 in CSA and bipolar
-metadata_all = metadata[['study', 'group', 'extraction_date']].copy()
-# Bipolar metadata
-metadata_bp = pd.DataFrame({
-    'study': 'ABIGNET',
-    'group': 'Bipolar 1',
-    'extraction_date': '4/9/24',
-}, index=bipolar.columns)
-metadata_all = pd.concat([metadata_all, metadata_bp])
-metadata_all1 = metadata_all.copy()
-
-metadata_all1.group.replace({
-    'Antipsychotic responsive': 'Schizophrenia',
-    'Clozapine responsive': 'Schizophrenia',
-    'Clozapine resistant': 'Schizophrenia',
-}, inplace=True)
-
-csabp_meta = csabp.T.join(metadata_all, how='inner')
-csabp_meta1 = csabp.T.join(metadata_all1, how='inner')
-
-for prot in prots_spearman:
-    fig, ax = plt.subplots(figsize=(6, 4))
-    sns.stripplot(
-        data=csabp_meta1,
-        x='group',
-        y=prot,
-        hue='extraction_date',
-        ax=ax
-    )
-    ax.tick_params(axis='x', rotation=20)
-    filepath = f'outputs/figs/expression/stripplot-{prot}.pdf'
-    plt.savefig(filepath, bbox_inches='tight')
-
-for prot in prots_spearman:
-    fig, ax = plt.subplots(figsize=(6, 4))
-    sns.stripplot(
-        data=csabp_meta1,
-        x='group',
-        y=prot,
-        hue='extraction_date',
-        ax=ax
-    )
-    ax.tick_params(axis='x', rotation=20)
-    hc = csabp_meta1.loc[csabp_meta1['group'] == 'Healthy control', prot].dropna()
-    sz = csabp_meta1.loc[csabp_meta1['group'] == 'Schizophrenia', prot].dropna()
-    _, pval = stats.ttest_ind(hc, sz)
-    ax.set_title(f'{prot} (p = {pval:.3g})')
-    filepath = f'outputs/figs/expression/stripplot1-{prot}.pdf'
-    plt.savefig(filepath, bbox_inches='tight')
-
-
-# TODO: Plot expression ratios
-pairs = list(combinations(prots_spearman, 2))
-ratio_data = {
-    f'{p1}_{p2}': csabp.loc[p1] / csabp.loc[p2]
-    for p1, p2 in pairs
-}
-csabp_ratios = pd.DataFrame(ratio_data)  # samples x pairs
-csabp_ratios_meta = csabp_ratios.join(metadata_all, how='inner')
-for pair in csabp_ratios.columns:
-    fig, ax = plt.subplots(figsize=(6, 4))
-    sns.stripplot(
-        data=csabp_ratios_meta,
-        x='group',
-        y=pair,
-        hue='extraction_date',
-        ax=ax
-    )
-    ax.tick_params(axis='x', rotation=20)
-    filepath = f'outputs/figs/expression/stripplot-ratios-{pair}.pdf'
-    plt.savefig(filepath, bbox_inches='tight')
-    print(filepath)
-
-
-# # Identify the patient IDs of all timepoints from outliers
-# outliers = lyriks_meta.index[
-#     (lyriks_meta.extraction_date == '4/9/24') &
-#     (lyriks_meta.run_datetime > pd.to_datetime('2024-09-20 12:00:00'))
-# ]
-# outliers_sn = outliers.str.split('_').str[0] # ['L0626C', 'L0018C']
-
-
-### Subset data ###
-
-# # Raw data
-# ctrl_raw = bp.subset(
-#     lyriks_full, metadata,
-#     "group == 'Healthy control'"
-# )
-# ctrl_raw_int = ctrl_raw.T.join(metadata_month, how='inner')
-
-
-### Plot: Raw data ###
-
-batch_colours = {
-    '28/8/24': 'tab:blue',
-    '4/9/24': 'tab:orange',
-    '5/9/24': 'tab:green',
-}
-map_timepoint_marker = {
-    0: 'o',
-    12: 's',
-    24: '^'
-}
-map_group_marker = {
-    'Control': 'o',
-    'Early remit': 's',
-    'Maintain': '^',
-    'Convert': 'D',
-    'Late remit': 'P',
-    'Relapse': 'X'
-}
-
-
-def plot_batch_effects_2d(df, prot, batch_colours):
-    ylabel = f"{map_uniprot_gene[prot]} ({prot})"
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4), sharey=True)
-    sns.scatterplot(
-        data=df, x="collection_datenum", y=prot,
-        hue="extraction_date", style="group",
-        palette=batch_colours, alpha=0.7, edgecolor='none', legend=False,
-        ax=ax1
-    )
-    sns.scatterplot(
-        data=df, x="run_datenum", y=prot,
-        hue="extraction_date", style="group",
-        palette=batch_colours, alpha=0.7, edgecolor='none', ax=ax2
-    )
-    ax1.set_ylabel(ylabel)
-    ax2.legend(loc="upper left", bbox_to_anchor=(1, 1))
-    ax1.set_xlabel("Collection time")
-    ax2.set_xlabel("Run time")
-    return fig
-
-
-def plot_batch_effects_3d(df, prot, batch_colours, group_markers):
-    fig = plt.figure(figsize=(7, 5))
-    ax = fig.add_subplot(111, projection='3d')
-    for g, subdf in df.groupby("group"):
-        ax.scatter(
-            subdf["collection_datenum"],
-            subdf["run_datenum"],
-            subdf[prot],
-            c=subdf.extraction_date.map(batch_colours),
-            marker=group_markers[g],
-            alpha=0.7,
-            depthshade=False,
-            label=g
-        )
-    ax.view_init(elev=15, azim=-30)
-    ax.set_xlabel("Collection time")
-    ax.set_ylabel("Run time")
-    ax.set_zlabel(f"{map_uniprot_gene[prot]} ({prot})")
-    ax.legend(loc="upper left", bbox_to_anchor=(1, 1))
-    return fig
-
-
-prots_batch_effects = ['P02647', 'P00747']
-
-# dirpath = 'outputs/figs/trajectory/batch_effects/'
-# for prot in prots_spearman:
-#     fig = plot_batch_effects_2d(bipolar_meta, prot, batch_colours)
-#     filepath = os.path.join(dirpath, f'batch-bipolar-{prot}.pdf')
-#     fig.savefig(filepath, dpi=300, bbox_inches='tight')
-#     print(filepath)
-
-# for prot in prots_batch_effects:
-#     fig = plot_batch_effects_3d(
-#         lyriks_meta, prot, batch_colours, map_group_marker
-#     )
-#     filepath = os.path.join(dirpath, f'3D-batch-lyriks387-{prot}.pdf')
-#     fig.savefig(filepath, dpi=300, bbox_inches='tight')
-#     print(filepath)
-
-
-### Corrected data ###
-
-# L0073S_24 is not FEP but UHR!
-
-# ComBat corrected
-filepath = 'data/tmp/corr-2step/lyriks387-combat_0409.csv'
-lyriks387_cb0409 = pd.read_csv(filepath, index_col=0)
-lyriks387cb_meta = lyriks387_cb0409.T.join(metadata_month, how='inner')
-lyriks387cb_meta3 = lyriks387_cb0409.T.join(
-    metadata_month[['group', 'month', 'timepoint']],
-    how='inner'
-)
-
-### Plot: Corrected data ###
-
-# prots_batch_effects = ['P02647', 'P00747']
-# dirpath = 'outputs/figs/trajectory/batch_effects/'
-# for prot in prots_batch_effects:
-#     fig = plot_batch_effects_2d(lyriks387cb_meta, prot, batch_colours)
-#     filepath = os.path.join(dirpath, f'batch-lyriks387-cb0409-{prot}.pdf')
-#     fig.savefig(filepath, dpi=300, bbox_inches='tight')
-#     print(filepath)
-# 
-# for prot in prots_batch_effects:
-#     fig = plot_batch_effects_3d(
-#         lyriks387cb_meta, prot, batch_colours, map_group_marker
-#     )
-#     filepath = os.path.join(
-#         dirpath,
-#         f'3D-batch-lyriks387-cb0409-{prot}.pdf'
-#     )
-#     fig.savefig(filepath, dpi=300, bbox_inches='tight')
-#     print(filepath)
-
-
-### Feature selection (Spearman's rho)
-
-# rhos = []
-# for prot in cmc_combat_0409.index:
-#     symbol = map_uniprot_gene[prot]
-#     rho = spearmanr(
-#         cvt_int.fep_delta,
-#         cvt_int.loc[:, prot]
-#     ).correlation
-#     rhos.append(rho)
-# 
-# spearman_cvt = pd.DataFrame({
-#     'symbol': cmc_combat_0409.index.map(map_uniprot_gene),
-#     'spearman_r': rhos,
-# }, index=cmc_combat_0409.index)
-# spearman_cvt.sort_values('spearman_r', ascending=False, key=abs, inplace=True)
-# prots_spearman = spearman_cvt.index[abs(spearman_cvt.spearman_r) > 0.4]
-# 
-# filepath = 'outputs/tmp/cvt-spearman.csv'
-# spearman_cvt.to_csv(filepath, index=True)
-# print(filepath)
-
-
-### Plot trajectories ###
-
-### Plot trajectories of patients across different groups ###
-
-def plot_trajectory(x, feature, ylabel, batch_colours):
-    """Plot 5-panel trajectory figure for a single feature.
-
-    Parameters
-    ----------
-    x : DataFrame
-        Combined data for all groups. Must have columns: group, month,
-        timepoint, extraction_date, sn, and `feature`.
-    feature : str
-        Column name of the feature to plot (e.g. UniProt ID or CCA score).
-    ylabel : str
-        Label for the y-axis (e.g. gene symbol).
-    batch_colours : dict
-        Mapping from extraction_date value to colour.
-    """
-    cvt = x[x.group == 'Convert']
-    mnt = x[x.group == 'Maintain']
-    ctrl = x[x.group == 'Control']
-    early = x[x.group == 'Early remit']
-    late = x[x.group == 'Late remit']
-    relapse = x[x.group == 'Relapse']
-    rho_cvt = spearmanr(cvt.month, cvt.loc[:, feature]).correlation
-    rho_mnt = spearmanr(mnt.timepoint, mnt.loc[:, feature]).correlation
-    rho_ctrl = spearmanr(ctrl.timepoint, ctrl.loc[:, feature]).correlation
-    rho_early = spearmanr(early.timepoint, early.loc[:, feature]).correlation
-    rho_late = spearmanr(late.timepoint, late.loc[:, feature]).correlation
-    rho_relapse = spearmanr(relapse.timepoint, relapse.loc[:, feature]).correlation
-    ### Plot ###
-    fig, axes = plt.subplots(2, 3, figsize=(20, 10), sharey=True)
-    ax1, ax2, ax3 = axes[0]
-    ax4, ax5, ax6 = axes[1]
-    # Convert
-    ax1.scatter(
-        cvt.month,
-        cvt.loc[:, feature],
-        c=cvt.extraction_date.map(batch_colours)
-    )
-    ax1.set_title(rf'Convert ($\rho$ = {rho_cvt:.2f})')
-    ax1.set_xlabel("Months to conversion")
-    ax1.set_ylabel(ylabel)
-    for _, patient in cvt.sort_values("timepoint").groupby("sn"):
-        ax1.plot(
-            patient["month"],
-            patient.loc[:, feature],
-            color="gray", alpha=0.4, linewidth=1
-        )
-    # Maintain
-    ax2.scatter(
-        mnt.timepoint,
-        mnt.loc[:, feature],
-        c=mnt.extraction_date.map(batch_colours)
-    )
-    ax2.set_title(rf'Maintain ($\rho$ = {rho_mnt:.2f})')
-    ax2.set_xlabel("Timepoint")
-    for _, patient in mnt.sort_values("timepoint").groupby("sn"):
-        ax2.plot(
-            patient["timepoint"],
-            patient.loc[:, feature],
-            color="gray", alpha=0.4, linewidth=1
-        )
-    # Control
-    ax3.scatter(
-        ctrl.timepoint,
-        ctrl.loc[:, feature],
-        c=ctrl.extraction_date.map(batch_colours)
-    )
-    ax3.set_title(rf'Control ($\rho$ = {rho_ctrl:.2f})')
-    ax3.set_xlabel("Timepoint")
-    for _, patient in ctrl.sort_values("timepoint").groupby("sn"):
-        ax3.plot(
-            patient["timepoint"],
-            patient.loc[:, feature],
-            color="gray", alpha=0.4, linewidth=1
-        )
-    # Early remit
-    ax4.scatter(
-        early.timepoint,
-        early.loc[:, feature],
-        c=early.extraction_date.map(batch_colours)
-    )
-    ax4.set_title(rf'Early remit ($\rho$ = {rho_early:.2f})')
-    ax4.set_xlabel("Timepoint")
-    ax4.set_ylabel(ylabel)
-    for _, patient in early.sort_values("timepoint").groupby("sn"):
-        ax4.plot(
-            patient["timepoint"],
-            patient.loc[:, feature],
-            color="gray", alpha=0.4, linewidth=1
-        )
-    # Late remit
-    ax5.scatter(
-        late.timepoint,
-        late.loc[:, feature],
-        c=late.extraction_date.map(batch_colours)
-    )
-    ax5.set_title(rf'Late remit ($\rho$ = {rho_late:.2f})')
-    ax5.set_xlabel("Timepoint")
-    for _, patient in late.sort_values("timepoint").groupby("sn"):
-        ax5.plot(
-            patient["timepoint"],
-            patient.loc[:, feature],
-            color="gray", alpha=0.4, linewidth=1
-        )
-    # Relapse
-    ax6.scatter(
-        relapse.timepoint,
-        relapse.loc[:, feature],
-        c=relapse.extraction_date.map(batch_colours)
-    )
-    ax6.set_title(rf'Relapse ($\rho$ = {rho_relapse:.2f})')
-    ax6.set_xlabel("Timepoint")
-    for _, patient in relapse.sort_values("timepoint").groupby("sn"):
-        ax6.plot(
-            patient["timepoint"],
-            patient.loc[:, feature],
-            color="gray", alpha=0.4, linewidth=1
-        )
-    return fig
-
-
 # Mongan proteins
 filepath = 'data/etc/mongan-etable5.csv'
 mongan = pd.read_csv(filepath, index_col=0)
@@ -565,105 +208,584 @@ plt.savefig(filepath, dpi=300, bbox_inches='tight')
 plt.close()
 
 
-### CCA ###
-# ### Plot CCA trajectory ###
+### Calculate mean absolute rho value from each subgroup ###
+
+def compute_rho(x):
+    '''Compute rho for all proteins across all groups of patients
+
+    Args:
+        x: DataFrame with shape sample x feature. Features include proteins
+        and group, month and timepoint
+    '''
+    cvt = x[x.group == 'Convert']
+    mnt = x[x.group == 'Maintain']
+    ctrl = x[x.group == 'Control']
+    early = x[x.group == 'Early remit']
+    late = x[x.group == 'Late remit']
+    relapse = x[x.group == 'Relapse']
+    rows = []
+    for uid in x.columns[:-3]:
+        print(uid)
+        rows.append({
+            'uniprot': uid,
+            'rho_cvt': spearmanr(cvt.month, cvt.loc[:, uid]).correlation,
+            'rho_mnt': spearmanr(mnt.timepoint, mnt.loc[:, uid]).correlation,
+            'rho_ctrl': spearmanr(ctrl.timepoint, ctrl.loc[:, uid]).correlation,
+            'rho_early': spearmanr(early.timepoint, early.loc[:, uid]).correlation,
+            'rho_late': spearmanr(late.timepoint, late.loc[:, uid]).correlation,
+            'rho_relapse': spearmanr(relapse.timepoint, relapse.loc[:, uid]).correlation,
+        })
+    return pd.DataFrame(rows).set_index('uniprot')
+
+# rhos = compute_rho(lyriks387cb_meta3)
+# rhos.insert(0, 'Description', rhos.index.map(map_uniprot_description))
+# rhos.insert(0, 'Gene', rhos.index.map(map_uniprot_gene))
+# filepath = 'outputs/tmp/rhos.csv'
+# rhos.to_csv(filepath)
+
+filepath = 'outputs/tmp/rhos.csv'
+rhos = pd.read_csv(filepath, index_col=0)
+rhos.head()
+
+
+# TODO: Compute rho for all possible pairs of proteins in CSA?
+# TODO: Filter for high rhos?
+# TODO: See whether they are biologically related to spearman8?
+
+### Null distribution ###
+
+# n_iter = 1000
+# null_means = []
+# np.random.seed(42)
+# for i in range(n_iter):
+#     sample = rhos.sample(n=8)
+#     null_means.append(sample['rho_cvt'].abs().mean())
 # 
-# cca_scores = pd.read_csv('data/tmp/zhihao/cca_m2c-scores.csv')
-# cca_scores = cca_scores[[
-#     'sn', 'timepoint', 'group', 'extraction_date', 'month', 'cca1_score']]
+# null_means = pd.Series(null_means)
+# mean_abs_rho_spearman8 = rhos.loc[prots_spearman, 'rho_cvt'].abs().mean()
 # 
-# fig = plot_trajectory(cca_scores, 'cca1_score', 'CCA1', batch_colours)
-# filepath = 'outputs/figs/trajectory/trajectory-cca1.pdf'
+# print(rhos.shape)
+# fig, ax = plt.subplots(figsize=(7, 4))
+# ax.hist(null_means, bins=30, edgecolor='none')
+# ax.axvline(
+#     mean_abs_rho_spearman8, color='red',
+#     linestyle='--', label='Spearman top-8'
+# )
+# ax.set_xlabel(r'Mean absolute $\rho$')
+# ax.set_ylabel('Count')
+# filepath = 'outputs/figs/trajectory/null_dist-mean_abs_rho_cvt.pdf'
 # plt.savefig(filepath, dpi=300, bbox_inches='tight')
 # plt.close()
 
 
-# # %% Load CCA model and get weights
+### Plot horizontal barplot of coefficients ###
+
+# # Plot heatmap
+# map_labels = {
+#     'rho_cvt': 'Convert',
+#     'rho_ctrl': 'Control',
+#     'rho_mnt': 'Maintain',
+#     'rho_early': 'Early remit',
+#     'rho_late': 'Late remit',
+#     'rho_relapse': 'Relapse'
+# }
 # 
-# filepath = 'data/tmp/zhihao/cca.pkl'
-# with open(filepath, 'rb') as f:
-#     cca = pickle.load(f)
+# rhos = rhos.drop(columns='Description')
+# rhos = rhos.iloc[:, [0, 1, 3, 2, 4, 5]]
+# rhos.head()
 # 
-# model = cca['cca_model']
-# weights = model.x_weights_
-# weights = pd.DataFrame({
-#     'symbol': cmc_combat_0409.index.map(map_uniprot_gene),
-#     'coef': weights[:, 0]
-# }, index=cmc_combat_0409.index)
-# weights.sort_values('coef', ascending=False, key=abs, inplace=True)
-# weights.head()
-# filepath = 'outputs/tmp/cca_weights.csv'
-# weights.to_csv(filepath)
+# 
+# ### Spearman's ###
+# 
+# hm_data = rhos.loc[prots_spearman, :]
+# hm_data = hm_data.set_index('Gene')
+# hm_data.columns = hm_data.columns.map(map_labels)
+# 
+# fig, ax = plt.subplots(figsize=(5, 4.9))
+# sns.heatmap(
+#     hm_data,
+#     cmap='RdBu',
+#     center=0,
+#     vmin=-1, vmax=1,
+#     annot=True,
+#     fmt='.2f',
+#     linewidths=0.5,
+#     ax=ax
+# )
+# ax.set_xlabel('')
+# ax.set_ylabel('')
+# plt.tight_layout()
+# filepath = 'outputs/figs/trajectory/heatmap-rhos-spearman.pdf' 
+# plt.savefig(filepath, dpi=150, bbox_inches='tight')
+# plt.close()
+# 
+# 
+# ### TP ###
+# 
+# chan_present = uid_ancova.union(uid_enet)[
+#     uid_ancova.union(uid_enet).isin(rhos.index)
+# ]
+# hm_data = rhos.loc[chan_present, :]
+# hm_data = hm_data.set_index('Gene')
+# hm_data.columns = hm_data.columns.map(map_labels)
+# 
+# fig, ax = plt.subplots(figsize=(5, 8))
+# sns.heatmap(
+#     hm_data,
+#     cmap='RdBu',
+#     center=0,
+#     vmin=-1, vmax=1,
+#     annot=True,
+#     fmt='.2f',
+#     linewidths=0.5,
+#     ax=ax
+# )
+# ax.set_xlabel('')
+# ax.set_ylabel('')
+# plt.tight_layout()
+# filepath = 'outputs/figs/trajectory/heatmap-rhos-tp.pdf' 
+# plt.savefig(filepath, dpi=150, bbox_inches='tight')
+# plt.close()
+# 
+# 
+# ### Mongan ###
+# 
+# prots = uid_mongan[uid_mongan.isin(rhos.index) & ~uid_mongan.isin(chan_present)]
+# hm_data = rhos.loc[prots, :]
+# hm_data = hm_data.set_index('Gene')
+# hm_data.columns = hm_data.columns.map(map_labels)
+# 
+# fig, ax = plt.subplots(figsize=(5, 12))
+# sns.heatmap(
+#     hm_data,
+#     cmap='RdBu',
+#     center=0,
+#     vmin=-1, vmax=1,
+#     annot=True,
+#     fmt='.2f',
+#     linewidths=0.5,
+#     ax=ax
+# )
+# ax.set_xlabel('')
+# ax.set_ylabel('')
+# plt.tight_layout()
+# filepath = 'outputs/figs/trajectory/heatmap-rhos-mongan.pdf' 
+# plt.savefig(filepath, dpi=150, bbox_inches='tight')
+# plt.close()
+# 
+# 
+# # TODO: Plot spearman's proteins first
+# n_rows = 2
+# n_cols = 4
+# n_grps = 6
+# fig, axes = plt.subplots(
+#     n_rows, n_cols,
+#     sharex=True, sharey=True,
+#     figsize=(n_cols * 3.5, n_rows * 2.5)
+# )
+# 
+# axes = axes.flatten()
+# for i, uid in enumerate(prots_spearman):
+#     ax = axes[i]
+#     group_rhos = {
+#         'Convert': rhos.loc[uid, 'rho_cvt'],
+#         'Control': rhos.loc[uid, 'rho_ctrl'],
+#         'Maintain': rhos.loc[uid, 'rho_mnt'],
+#         'Early remit': rhos.loc[uid, 'rho_early'],
+#         'Late remit': rhos.loc[uid, 'rho_late'],
+#         'Relapse': rhos.loc[uid, 'rho_relapse'],
+#     }
+#     positions = list(reversed(range(n_grps)))
+#     values =  group_rhos.values()
+#     colors = ['tab:blue' if v > 0 else 'tab:red' for v in values]
+#     ax.barh(positions, values, color=colors, edgecolor='none')
+#     ax.set_yticks(positions)
+#     ax.set_yticklabels(group_rhos.keys())
+#     ax.axvline(0, color='black', linewidth=0.8)
+#     ax.set_title(f"{map_uniprot_gene[uid]} ({uid})")
+#     ax.set_xlim(-1, 1)
+#     # ax.tick_params(labelsize=7)
+# 
+# # for ax in axes[n_prots:]:
+# #     ax.set_visible(False)
+# 
+# # plt.suptitle("Spearman ρ by group (Mongan proteins)", fontsize=10)
+# plt.tight_layout()
+# filepath = 'outputs/figs/trajectory/barh-rhos-spearman8.pdf'
+# plt.savefig(filepath, dpi=300, bbox_inches='tight')
+# plt.close()
+# 
+# uids_mongan_in_rhos = [uid for uid in set_mongan if uid in rhos.index]
+# n_prots = len(uids_mongan_in_rhos)
+# n_cols = 2
+# n_rows = int(np.ceil(n_prots / n_cols))
+# fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 3, n_rows * 2.5))
+# axes = axes.flatten()
+# for i, uid in enumerate(uids_mongan_in_rhos):
+#     ax = axes[i]
+#     group_rhos = {
+#         'Convert': rhos.loc[uid, 'rho_cvt'],
+#         'Control': rhos.loc[uid, 'rho_ctrl'],
+#         'Maintain': rhos.loc[uid, 'rho_mnt'],
+#         'Early remit': rhos.loc[uid, 'rho_early'],
+#         'Late remit': rhos.loc[uid, 'rho_late'],
+#         'Relapse': rhos.loc[uid, 'rho_relapse'],
+#     }
+#     labels = list(group_rhos.keys())
+#     values = list(group_rhos.values())
+#     colors = ['tab:red' if v >= 0 else 'tab:blue' for v in values]
+#     ax.barh(labels, values, color=colors, edgecolor='none')
+#     ax.invert_yaxis()
+#     ax.axvline(0, color='black', linewidth=0.8)
+#     ax.set_title(f"{map_uniprot_gene[uid]}\n({uid})", fontsize=8)
+#     ax.set_xlim(-1, 1)
+#     ax.tick_params(labelsize=7)
+# 
+# for ax in axes[n_prots:]:
+#     ax.set_visible(False)
+# 
+# plt.suptitle("Spearman ρ by group (Mongan proteins)", fontsize=10)
+# plt.tight_layout()
+# filepath = 'outputs/figs/trajectory/barh_mongan_rhos.pdf'
+# plt.savefig(filepath, dpi=300, bbox_inches='tight')
+# plt.close()
 
-# uids_cca = weights.index[weights.coef.abs() > 0.1]
 
-### Plot trajectory in PCA and UMAP space ###
+### Protein-protein correlations ###
 
-# def plot_pca_trajectory(x, metadata, filepath):
-#     fig, ax = plt.subplots(figsize=(8, 4))
-#     ax, pca_cvt = bp.plot_pca(
-#         ax,
-#         x,
-#         metadata.loc[x.columns],
-#         colourbar=True,
-#         return_fig=False,
-#         hue='month',
-#         hue_label='Months to conversion',
-#         palette='rocket'
+groups_lyriks = [
+    'Convert', 'Maintain', 'Control',
+    'Early remit', 'Late remit', 'Relapse'
+]
+
+# Plot correlation between spearman8 proteins in different groups
+fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+for ax, g in zip(axes.flat, groups_lyriks):
+    df = bp.subset(lyriks387_cb0409, metadata_month, f"group == '{g}'").T
+    df = df[prots_spearman]
+    df.columns = df.columns.map(map_uniprot_gene)
+    corr = df.corr()
+    mask = np.triu(np.ones_like(corr, dtype=bool))
+    lower = corr.values[np.tril(np.ones_like(corr, dtype=bool), k=-1)]
+    mean_r = lower.mean()
+    std_r = lower.std()
+    sns.heatmap(
+        corr, mask=mask, cmap='coolwarm',
+        annot=True, fmt='.2f',
+        vmin=-1, vmax=1, ax=ax
+    )
+    ax.set_title(rf"{g} ($\rho$ = {mean_r:.3f} $\pm$ {std_r:.3f})")
+
+fig.tight_layout(pad=3.0)
+fig.savefig('outputs/figs/corrheatmap/corr-groups.pdf', bbox_inches='tight')
+plt.close(fig)
+
+# Plot correlations in convert group (without FEP)
+# TODO: Check state of L0609S_6
+metadata_cvt = metadata_month.loc[
+    metadata_month.group == 'Convert',
+    ['sn', 'timepoint', 'group', 'state']
+]
+idx_cvt = (
+    metadata_cvt
+        .groupby('sn')
+        .apply(lambda g: g.iloc[:-1])
+        .index.get_level_values(1)
+)
+
+cvt_no_fep = lyriks387_cb0409.loc[prots_spearman, idx_cvt].T
+cvt_no_fep.columns = cvt_no_fep.columns.map(map_uniprot_gene)
+corr = cvt_no_fep.corr()
+mask = np.triu(np.ones_like(corr, dtype=bool))
+lower = corr.values[np.tril(np.ones_like(corr, dtype=bool), k=-1)]
+mean_r = lower.mean()
+std_r = lower.std()
+fig, ax = plt.subplots(figsize=(6, 4.9))
+sns.heatmap(
+    corr, mask=mask, cmap='coolwarm',
+    annot=True, fmt='.2f',
+    vmin=-1, vmax=1,
+    ax=ax
+)
+ax.set_title(rf"Convert ($\rho$ = {mean_r:.3f} $\pm$ {std_r:.3f})")
+fig.tight_layout(pad=3.0)
+fig.savefig('outputs/figs/corr/corr-cvt_no_fep.pdf', bbox_inches='tight')
+plt.close(fig)
+
+
+# Plot correlations in CSA
+groups_csa = [
+    'Healthy control', 'Antipsychotic responsive',
+    'Clozapine responsive', 'Clozapine resistant'
+]
+
+fig, axes = plt.subplots(2, 2, figsize=(11, 10))
+for ax, g in zip(axes.flat, groups_csa):
+    df = bp.subset(csa, metadata_month, f"group == '{g}'").T
+    df = df[prots_spearman]
+    df.columns = df.columns.map(map_uniprot_gene)
+    corr = df.corr()
+    mask = np.triu(np.ones_like(corr, dtype=bool))
+    lower = corr.values[np.tril(np.ones_like(corr, dtype=bool), k=-1)]
+    mean_r = lower.mean()
+    std_r = lower.std()
+    sns.heatmap(
+        corr, mask=mask, cmap='coolwarm',
+        annot=True, fmt='.2f',
+        vmin=-1, vmax=1, ax=ax
+    )
+    ax.set_title(rf"{g} ($\rho$ = {mean_r:.3f} $\pm$ {std_r:.3f})")
+    ax.set_xlabel('')
+    ax.set_ylabel('')
+
+fig.tight_layout(pad=3.0)
+fig.savefig('outputs/figs/corr/corr-groups-csa.pdf', bbox_inches='tight')
+plt.close(fig)
+
+
+# Plot correlations in bipolar
+fig, ax = plt.subplots(1, 1, figsize=(5, 4.5))
+df = bipolar.T[prots_spearman]
+df.columns = df.columns.map(map_uniprot_gene)
+corr = df.corr()
+mask = np.triu(np.ones_like(corr, dtype=bool))
+lower = corr.values[np.tril(np.ones_like(corr, dtype=bool), k=-1)]
+mean_r = lower.mean()
+std_r = lower.std()
+sns.heatmap(
+    corr, mask=mask, cmap='coolwarm',
+    annot=True, fmt='.2f',
+    vmin=-1, vmax=1, ax=ax
+)
+ax.set_title(rf"Bipolar ($\rho$ = {mean_r:.3f} $\pm$ {std_r:.3f})")
+ax.set_xlabel('')
+ax.set_ylabel('')
+
+fig.tight_layout(pad=3.0)
+fig.savefig(
+    'outputs/figs/corrheatmap/corr-groups-bipolar.pdf',
+    bbox_inches='tight'
+)
+plt.close(fig)
+
+# Plot individual correlation for convert patients with >3 TP
+cvt_counts = metadata_month[
+    metadata_month['group'] == 'Convert'
+].groupby('sn').size()
+cvt_pids = cvt_counts.index[cvt_counts > 3]
+
+metadata_month.loc[
+    metadata_month.group == 'Convert',
+    ['month_of_conversion', 'month']
+]
+
+records = []
+for sn in cvt_pids:
+    print(sn)
+    for i in range(3):
+        data = lyriks387_cb0409.loc[
+            lyriks387_cb0409.index.isin(prots_spearman),
+            lyriks387_cb0409.columns.str.startswith(sn)
+        ].T
+        nrow = data.shape[0] - i
+        data = data.iloc[:nrow, :]
+        data.columns = data.columns.map(map_uniprot_gene)
+        corr = data.corr()
+        mask = np.triu(np.ones_like(corr, dtype=bool))
+        lower = corr.values[np.tril(np.ones_like(corr, dtype=bool), k=-1)]
+        fig, ax = plt.subplots(figsize=(6.5, 5))
+        sns.heatmap(
+            corr, mask=mask, cmap='coolwarm',
+            annot=True, fmt='.2f',
+            vmin=-1, vmax=1, ax=ax
+        )
+        ax.set_title(f'{sn} ({nrow} timepoints)')
+        filepath = f'outputs/figs/corr/corr-{sn}-{nrow}.pdf'
+        fig.savefig(filepath, bbox_inches='tight')
+        plt.close(fig)
+        pairs = [
+            f"{corr.index[r]}_{corr.columns[c]}"
+            for r in range(len(corr))
+            for c in range(r)
+        ]
+        for pairname, rho in zip(pairs, lower):
+            records.append((sn, nrow, pairname, rho))
+
+corr_cvt = pd.DataFrame(records, columns=['pid', 'ntimepoints', 'pair', 'rho'])
+corr_cvt['ntimepoints'] = corr_cvt['ntimepoints'].astype('category')
+
+### Collate protein-protein correlations across studies and groups ###
+def _collate_corr(X, metadata, study, groups):
+    records = []
+    if groups is None:
+        df = X.T[prots_spearman]
+        df.columns = df.columns.map(map_uniprot_gene)
+        corr = df.corr()
+        for i in range(len(corr)):
+            for j in range(i):
+                pair = f"{corr.index[i]}-{corr.columns[j]}"
+                records.append((study, study, pair, corr.iloc[i, j]))
+        return records
+    for g in groups:
+        df = bp.subset(X, metadata, f"group == '{g}'").T
+        df = df[prots_spearman]
+        df.columns = df.columns.map(map_uniprot_gene)
+        corr = df.corr()
+        for i in range(len(corr)):
+            for j in range(i):
+                pair = f"{corr.index[i]}-{corr.columns[j]}"
+                records.append((study, g, pair, corr.iloc[i, j]))
+    return records
+
+corr_records = []
+corr_records += _collate_corr(
+    lyriks387_cb0409, metadata_month, 'LYRIKS', groups_lyriks
+)
+corr_records += _collate_corr(
+    csa, metadata_month, 'CSA', groups_csa
+)
+corr_records += _collate_corr(bipolar, None, 'Bipolar', None)
+rhos_long = pd.DataFrame(
+    corr_records, columns=['Study', 'Group', 'Pair', 'Rho']
+)
+
+# Plot confidence intervals of each patient group
+def _rho_ci(x, confidence=0.95):
+    n = len(x)
+    m = x.mean()
+    h = stats.t.interval(confidence, df=n - 1, loc=m, scale=stats.sem(x))
+    return pd.Series({'mean': m, 'low': h[0], 'high': h[1]})
+
+ci_df = (
+    rhos_long
+        .groupby(['Study', 'Group'])['Rho']
+        .apply(_rho_ci)
+        .unstack()
+)
+
+# TODO: Plot correlations jitter plot of patient at individual timepoints
+for pid in cvt_pids:
+    corr_pid = corr_cvt[corr_cvt.pid == pid]
+    corr_pid.ntimepoints = corr_pid.ntimepoints.cat.remove_unused_categories()
+    fig, (ax1, ax2) = plt.subplots(
+        2, 1, figsize=(5, 5), sharex=True,
+        gridspec_kw={'height_ratios': [3, 5]}
+    )
+    sns.stripplot(
+        corr_pid,
+        x='rho',
+        y='ntimepoints',
+        ax=ax1
+    )
+    means = corr_pid.groupby('ntimepoints', observed=True)['rho'].mean()
+    categories = corr_pid['ntimepoints'].cat.categories.tolist()
+    for ntpt, mean_rho in means.items():
+        ax1.plot(
+            mean_rho, categories.index(ntpt),
+            marker='D', color='red', markersize=5, zorder=5
+        )
+    ax1.set_ylabel('No. of timepoints')
+    ax1.axvline(0, color='grey', linestyle='--', linewidth=0.8)
+    ax1.tick_params(axis='x', rotation=15)
+    ax1.margins(y=0.2)
+    ax1.set_title(pid)
+    df = ci_df.loc['LYRIKS'].reindex(groups_lyriks)
+    ax2.errorbar(
+        x=df['mean'], y=groups_lyriks,
+        xerr=[df['mean'] - df['low'], df['high'] - df['mean']],
+        fmt='o', capsize=4
+    )
+    ax2.axvline(0, color='gray', linestyle='--', linewidth=0.8)
+    ax2.margins(y=0.1)
+    ax2.set_title('LYRIKS')
+    ax2.set_xlabel(r'$\rho$')
+    ax2.set_ylabel('Group')
+    fig.tight_layout()
+    filepath = f'outputs/figs/corr/stripplot-{pid}.pdf'
+    plt.savefig(filepath, bbox_inches='tight')
+    print(filepath)
+    
+
+# fig, ax = plt.subplots(figsize=(5, 3))
+# df = ci_df.loc['LYRIKS'].reindex(groups_lyriks)
+# ax.errorbar(
+#     x=df['mean'], y=groups_lyriks,
+#     xerr=[df['mean'] - df['low'], df['high'] - df['mean']],
+#     fmt='o', capsize=4
+# )
+# ax.axvline(0, color='gray', linestyle='--', linewidth=0.8)
+# ax.margins(y=0.2)
+# ax.set_title('LYRIKS')
+# ax.set_xlabel(r'$\rho$')
+# ax.set_ylabel('Group')
+# fig.tight_layout()
+# filepath = 'outputs/figs/corr/corr-ci-lyriks.pdf'
+# fig.savefig(filepath, bbox_inches='tight')
+# plt.close(fig)
+# print(filepath)
+
+### CI for all datasets
+# fig, axes = plt.subplots(
+#     3, 1, figsize=(6, 6),
+#     gridspec_kw={'height_ratios': [6, 4, 1]},
+#     sharex=True
+# )
+# panels = [
+#     ('LYRIKS', groups_lyriks),
+#     ('CSA',    groups_csa),
+#     ('Bipolar', ['Bipolar']),
+# ]
+# for ax, (study, groups) in zip(axes, panels):
+#     df = ci_df.loc[study].reindex(groups)
+#     ax.errorbar(
+#         x=df['mean'], y=groups,
+#         xerr=[df['mean'] - df['low'], df['high'] - df['mean']],
+#         fmt='o', capsize=4
 #     )
-#     for _, patient in pca_cvt.sort_values("timepoint").groupby("sn"):
-#         ax.plot(
-#             patient["PC1"],
-#             patient["PC2"],
-#             color="gray", alpha=0.4, linewidth=1
-#         )
-#     plt.savefig(filepath, dpi=300, bbox_inches='tight')
+#     ax.axvline(0, color='gray', linestyle='--', linewidth=0.8)
+#     ax.margins(y=0.2)
+#     ax.set_title(study)
+#     ax.set_xlabel(r'$\rho$')
+#     ax.set_ylabel('')
 # 
-# 
-# plot_pca_trajectory(
-#     cmc_combat_0409.loc[uids_cca],
-#     metadata_month,
-#     'outputs/figs/trajectory/pca-cca23-cmc_combat_0409.pdf'
-# )
-# 
-# plot_pca_trajectory(
-#     cvt.loc[uids_cca],
-#     metadata_month,
-#     'outputs/figs/trajectory/pca-cca23-cvt_combat_0409.pdf'
-# )
-# 
-# plot_pca_trajectory(
-#     cvt.loc[prots_spearman],
-#     metadata_month,
-#     'outputs/figs/trajectory/pca-spearman8-cvt_combat_0409.pdf'
-# )
-# 
-# 
-# def plot_umap_trajectory(x, metadata, filepath):
-#     fig, ax = plt.subplots(figsize=(8, 4))
-#     ax, umap_cvt = bp.plot_umap(
-#         ax,
-#         x,
-#         metadata.loc[x.columns],
-#         colourbar=True,
-#         return_fig=False,
-#         hue='month',
-#         hue_label='Months to conversion',
-#         palette='rocket'
-#     )
-#     for _, patient in umap_cvt.sort_values("timepoint").groupby("sn"):
-#         ax.plot(
-#             patient["UMAP1"],
-#             patient["UMAP2"],
-#             color="gray", alpha=0.4, linewidth=1
-#         )
-#     plt.savefig(filepath, dpi=300, bbox_inches='tight')
-# 
-# plot_umap_trajectory(
-#     cmc_combat_0409.loc[prots_spearman],
-#     metadata_month,
-#     'outputs/figs/trajectory/umap-spearman10-cmc_combat_0409.pdf'
-# )
+# fig.tight_layout()
+# filepath = 'outputs/figs/corr/corr-ci.pdf'
+# fig.savefig(filepath, bbox_inches='tight')
+# plt.close(fig)
+# print(filepath)
+
+
+
+# Plot jitter plots of correlation coefficients across patient groups
+fig, axes = plt.subplots(
+    1, 3, figsize=(13, 4),
+    gridspec_kw={'width_ratios': [6, 4, 1]},
+    sharey=True
+)
+panels = [
+    ('LYRIKS', groups_lyriks),
+    ('CSA',    groups_csa),
+    ('Bipolar', ['Bipolar']),
+]
+for ax, (study, groups) in zip(axes, panels):
+    sns.stripplot(
+        data=rhos_long[rhos_long.Study == study],
+        x='Group', y='Rho', order=groups,
+        jitter=True, alpha=0.7, ax=ax
+    )
+    ax.axhline(0, color='gray', linestyle='--', linewidth=0.8)
+    ax.set_title(study)
+    ax.set_xlabel('')
+    ax.tick_params(axis='x', rotation=15)
+
+axes[0].set_ylabel(r'$\rho$')
+for ax in axes[1:]:
+    ax.set_ylabel('')
+
+fig.tight_layout()
+fig.savefig('outputs/figs/corrheatmap/corr-jitter.pdf', bbox_inches='tight')
+plt.close(fig)
+
 
 
 ### Slopes ###
